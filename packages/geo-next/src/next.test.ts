@@ -53,3 +53,23 @@ it('getClientIP falls back through common headers', () => {
   expect(getClientIP(new Headers({ 'x-real-ip': '1.1.1.1' }))).toBe('1.1.1.1')
   expect(getClientIP(new Headers())).toBeNull()
 })
+
+describe('llmsRoute', () => {
+  it('serves the CMS file from the frontend domain', async () => {
+    const fetch = vi.fn(async (url: URL) => new Response(`# Acme from ${url.host}\n`))
+    const { llmsRoute } = await import('./index.js')
+    const res = await llmsRoute({ source: 'https://cms.test/api/geo/llms.txt', fetch: fetch as never })(
+      new Request('https://site.test/llms.txt'),
+    )
+    expect(res.headers.get('content-type')).toContain('text/plain')
+    expect(await res.text()).toBe('# Acme from cms.test\n')
+  })
+
+  it('returns 502 when the CMS is down', async () => {
+    const { llmsRoute } = await import('./index.js')
+    const res = await llmsRoute({ source: '/api/geo/llms.txt', fetch: (async () => { throw new Error('x') }) as never })(
+      new Request('https://site.test/llms.txt'),
+    )
+    expect(res.status).toBe(502)
+  })
+})

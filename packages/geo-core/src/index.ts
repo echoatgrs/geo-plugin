@@ -10,3 +10,23 @@ export {
   type IngestOptions,
   type IngestResult,
 } from './ingest.js'
+export { lexicalToMarkdown, richTextToMarkdown, strapiBlocksToMarkdown } from './markdown.js'
+export {
+  buildLlmsFullTxt,
+  buildLlmsTxt,
+  getField,
+  joinURL,
+  toLlmsDocument,
+  type LlmsDocument,
+  type LlmsSite,
+  type LlmsSourceConfig,
+} from './llms.js'
+export {
+  KNOWN_PLATFORMS,
+  normalizePath,
+  summarizeHits,
+  windowStart,
+  type CrawlerStats,
+  type StatsHit,
+  type StatsOptions,
+} from './stats.js'

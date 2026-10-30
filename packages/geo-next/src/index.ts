@@ -88,3 +88,38 @@ export function withGeo<R = undefined>(options: GeoTrackOptions, handler?: Handl
     return handler?.(request, event)
   }
 }
+
+export interface LlmsRouteOptions {
+  /** CMS URL serving the file, e.g. `https://cms.example.com/api/geo/llms.txt`. */
+  source: string
+  /** Seconds browsers and CDNs may cache the file. Default 300. */
+  maxAge?: number
+  fetch?: typeof fetch
+}
+
+/**
+ * Route handler that serves the CMS-generated llms.txt from the frontend's own domain,
+ * where AI assistants look for it.
+ *
+ * ```ts
+ * // app/llms.txt/route.ts
+ * import { llmsRoute } from '@headless-geo/next'
+ * export const GET = llmsRoute({ source: `${process.env.CMS_URL}/api/geo/llms.txt` })
+ * ```
+ */
+export function llmsRoute(options: LlmsRouteOptions): (request: Request) => Promise<Response> {
+  return async (request) => {
+    const doFetch = options.fetch ?? globalThis.fetch
+    const upstream = await doFetch(new URL(options.source, request.url), { headers: { accept: 'text/plain' } }).catch(
+      () => null,
+    )
+    if (!upstream?.ok) return new Response('llms.txt is temporarily unavailable\n', { status: 502 })
+    const maxAge = options.maxAge ?? 300
+    return new Response(await upstream.text(), {
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': `public, max-age=${maxAge}, stale-while-revalidate=${maxAge * 12}`,
+      },
+    })
+  }
+}

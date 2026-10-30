@@ -1,13 +1,21 @@
 // Minimal structural types for the parts of Strapi 5 this plugin touches,
 // so the plugin builds without pulling in @strapi/strapi.
+export interface DocumentServiceLike {
+  create(params: { data: Record<string, unknown> }): Promise<unknown>
+  findMany(params?: Record<string, unknown>): Promise<Record<string, any>[]>
+}
+
 export interface StrapiLike {
   plugin(name: string): { config<T = unknown>(key: string, defaultValue?: T): T }
-  documents(uid: string): { create(params: { data: Record<string, unknown> }): Promise<unknown> }
+  documents(uid: string): DocumentServiceLike
+  contentType?(uid: string): { info?: { pluralName?: string }; options?: { draftAndPublish?: boolean } } | undefined
   log: { warn(message: string): void; info(message: string): void }
 }
 
 export interface KoaContextLike {
   request: { body?: unknown; get(field: string): string }
+  query?: Record<string, unknown>
   status: number
   body: unknown
+  set?(field: string, value: string): void
 }
