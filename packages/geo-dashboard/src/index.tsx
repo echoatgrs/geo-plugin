@@ -61,6 +61,8 @@ function DailyChart({ daily }: { daily: CrawlerStats['daily'] }) {
         return (
           <g key={d.date}>
             <title>{`${d.date}: ${d.total} visits, ${d.user} live user fetches`}</title>
+            {/* Baseline tick so empty days are still visible. */}
+            <rect x={x} y={height - 2} width={barW} height={2} fill="currentColor" opacity={0.1} />
             <rect x={x} y={height - h} width={barW} height={h} rx={2} fill="currentColor" opacity={0.18} />
             <rect x={x} y={height - hu} width={barW} height={hu} rx={2} fill={ACCENT} />
           </g>

@@ -18,5 +18,8 @@ export function GeoDashboardClient({ statsURL, compact, moreHref, hitsHref }: Ge
     },
     [statsURL],
   )
-  return <GeoDashboard fetchStats={fetchStats} compact={compact} moreHref={moreHref} hitsHref={hitsHref} />
+  const dashboard = <GeoDashboard fetchStats={fetchStats} compact={compact} moreHref={moreHref} hitsHref={hitsHref} />
+  // `beforeList` renders outside the list view's gutter, so add Payload's own gutter around the full dashboard.
+  if (compact) return dashboard
+  return <div style={{ padding: '0 var(--gutter-h, 60px)', marginBottom: 40 }}>{dashboard}</div>
 }
