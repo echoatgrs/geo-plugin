@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "description": "Headless GEO for Strapi 5: AI crawler logs, llms.txt and an AI visibility dashboard.",
   "license": "MIT",
-  "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/echoatgrs/geo-plugin.git",
+    "directory": "packages/strapi-plugin-geo"
+  },
+  "homepage": "https://github.com/echoatgrs/geo-plugin#readme",
+  "bugs": "https://github.com/echoatgrs/geo-plugin/issues",
   "keywords": [
     "strapi",
     "strapi-plugin",
@@ -12,6 +18,7 @@
     "ai-crawler",
     "gptbot"
   ],
+  "type": "commonjs",
   "strapi": {
     "kind": "plugin",
     "name": "geo",
@@ -35,7 +42,8 @@
   },
   "files": [
     "dist",
-    "strapi-server.js"
+    "strapi-server.js",
+    "README.md"
   ],
   "scripts": {
     "build": "rm -rf dist && tsup",

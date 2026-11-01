@@ -3,6 +3,19 @@
   "version": "0.1.0",
   "description": "CMS-agnostic core for Headless GEO: AI crawler detection, IP verification and hit ingestion.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/echoatgrs/geo-plugin.git",
+    "directory": "packages/geo-core"
+  },
+  "homepage": "https://github.com/echoatgrs/geo-plugin#readme",
+  "bugs": "https://github.com/echoatgrs/geo-plugin/issues",
+  "keywords": [
+    "geo",
+    "llms.txt",
+    "ai-crawler",
+    "headless-cms"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "types": "./dist/index.d.ts",
@@ -19,12 +32,16 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
-  "module": "./dist/index.js"
+  "module": "./dist/index.js",
+  "publishConfig": {
+    "access": "public"
+  }
 }

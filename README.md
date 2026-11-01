@@ -154,3 +154,9 @@ npm run typecheck
 ## License
 
 MIT
+
+## Releasing
+
+1. Bump `version` in each `packages/*/package.json` (and the internal `@headless-geo/*` dependency versions).
+2. Push a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+3. The Release workflow builds, tests and publishes every package not yet on npm. It needs an `NPM_TOKEN` repository secret.

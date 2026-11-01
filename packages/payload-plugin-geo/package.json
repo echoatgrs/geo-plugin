@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "description": "Headless GEO for Payload CMS: AI crawler logs, llms.txt and an AI visibility dashboard.",
   "license": "MIT",
-  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/echoatgrs/geo-plugin.git",
+    "directory": "packages/payload-plugin-geo"
+  },
+  "homepage": "https://github.com/echoatgrs/geo-plugin#readme",
+  "bugs": "https://github.com/echoatgrs/geo-plugin/issues",
   "keywords": [
     "payload",
     "payload-plugin",
@@ -12,6 +18,7 @@
     "ai-crawler",
     "gptbot"
   ],
+  "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,7 +45,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "rm -rf dist && tsup",

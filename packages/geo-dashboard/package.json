@@ -3,17 +3,39 @@
   "version": "0.1.0",
   "description": "Shared React dashboard for Headless GEO, rendered inside the Payload and Strapi admin panels.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/echoatgrs/geo-plugin.git",
+    "directory": "packages/geo-dashboard"
+  },
+  "homepage": "https://github.com/echoatgrs/geo-plugin#readme",
+  "bugs": "https://github.com/echoatgrs/geo-plugin/issues",
+  "keywords": [
+    "geo",
+    "llms.txt",
+    "ai-crawler",
+    "headless-cms"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-      "require": { "types": "./dist/index.d.cts", "default": "./dist/index.cjs" }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
@@ -24,5 +46,8 @@
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
