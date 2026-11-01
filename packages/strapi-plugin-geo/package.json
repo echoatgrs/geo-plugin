@@ -50,8 +50,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@garus-ltd/core": "0.1.0",
-    "@garus-ltd/dashboard": "0.1.0"
+    "@garus-ltd/geo-core": "0.1.0",
+    "@garus-ltd/geo-dashboard": "0.1.0"
   },
   "peerDependencies": {
     "@strapi/strapi": "^5.0.0",

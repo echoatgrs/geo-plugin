@@ -3,7 +3,7 @@
 [Headless GEO](https://github.com/echoatgrs/geo-plugin) for Payload 3: see which AI crawlers read your site, serve llms.txt, and get an AI visibility dashboard in the admin.
 
 ```sh
-npm install payload-plugin-geo @garus-ltd/next
+npm install payload-plugin-geo @garus-ltd/geo-next
 ```
 
 ```ts
@@ -26,7 +26,7 @@ export default buildConfig({
 
 ```ts
 // middleware.ts (Next 15) or proxy.ts (Next 16), in the same app
-import { withGeo } from '@garus-ltd/next'
+import { withGeo } from '@garus-ltd/geo-next'
 
 export const middleware = withGeo({ endpoint: '/api/geo/ingest', secret: process.env.GEO_SECRET })
 ```

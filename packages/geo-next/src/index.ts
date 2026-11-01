@@ -1,4 +1,4 @@
-import { AI_BOTS, GEO_SECRET_HEADER, detectBot, type BotDefinition, type HitInput } from '@garus-ltd/core'
+import { AI_BOTS, GEO_SECRET_HEADER, detectBot, type BotDefinition, type HitInput } from '@garus-ltd/geo-core'
 
 /** Structural subset of Next's `NextFetchEvent`, so this also works in Cloudflare Workers and other Fetch runtimes. */
 export interface WaitUntilEvent {
@@ -78,7 +78,7 @@ type Handler<R> = (request: Request, event: WaitUntilEvent) => R
  *
  * ```ts
  * // proxy.ts (Next 16) or middleware.ts (Next 15)
- * import { withGeo } from '@garus-ltd/next'
+ * import { withGeo } from '@garus-ltd/geo-next'
  * export const proxy = withGeo({ endpoint: process.env.GEO_INGEST_URL!, secret: process.env.GEO_SECRET })
  * ```
  */
@@ -103,7 +103,7 @@ export interface LlmsRouteOptions {
  *
  * ```ts
  * // app/llms.txt/route.ts
- * import { llmsRoute } from '@garus-ltd/next'
+ * import { llmsRoute } from '@garus-ltd/geo-next'
  * export const GET = llmsRoute({ source: `${process.env.CMS_URL}/api/geo/llms.txt` })
  * ```
  */

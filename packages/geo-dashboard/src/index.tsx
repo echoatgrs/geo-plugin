@@ -1,4 +1,4 @@
-import type { CrawlerStats } from '@garus-ltd/core'
+import type { CrawlerStats } from '@garus-ltd/geo-core'
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
 export type { CrawlerStats }
@@ -99,7 +99,7 @@ function SetupHint() {
         <code>middleware.ts</code>) to start logging GPTBot, ClaudeBot, ChatGPT-User and others:
       </p>
       <pre style={{ margin: 0, padding: 12, borderRadius: 6, background: 'color-mix(in srgb, currentColor 8%, transparent)', overflowX: 'auto', fontSize: 12 }}>
-{`import { withGeo } from '@garus-ltd/next'
+{`import { withGeo } from '@garus-ltd/geo-next'
 
 export const proxy = withGeo({
   endpoint: process.env.GEO_INGEST_URL, // https://<cms>/api/geo/ingest

@@ -23,10 +23,10 @@ module.exports = ({ env }) => ({
 })
 ```
 
-Strapi can't see requests to your frontend, so add [`@garus-ltd/next`](https://www.npmjs.com/package/@garus-ltd/next) there:
+Strapi can't see requests to your frontend, so add [`@garus-ltd/geo-next`](https://www.npmjs.com/package/@garus-ltd/geo-next) there:
 
 ```ts
-import { withGeo } from '@garus-ltd/next'
+import { withGeo } from '@garus-ltd/geo-next'
 
 export const proxy = withGeo({ endpoint: 'https://cms.example.com/api/geo/ingest', secret: process.env.GEO_SECRET })
 ```

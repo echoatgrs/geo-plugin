@@ -1,4 +1,4 @@
-import type { LlmsSourceConfig } from '@garus-ltd/core'
+import type { LlmsSourceConfig } from '@garus-ltd/geo-core'
 
 export interface StrapiLlmsSource extends LlmsSourceConfig {
   /** Extra Document Service filters, e.g. `{ noindex: { $ne: true } }`. */
