@@ -7,7 +7,7 @@ import {
   type HitStore,
   type IPVerifierOptions,
   type StatsHit,
-} from '@headless-geo/core'
+} from '@garus-ltd/core'
 import type { CollectionConfig, Config, Endpoint, Plugin } from 'payload'
 import { CRAWLER_HITS_SLUG, crawlerHitsCollection } from './collection.js'
 import { loadLlmsDocuments, renderLlms, type LlmsOptions, type PayloadLlmsSource } from './llms.js'

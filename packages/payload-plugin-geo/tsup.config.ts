@@ -13,7 +13,7 @@ export default defineConfig([
     format: ['esm', 'cjs'],
     dts: true,
     sourcemap: true,
-    external: ['react', 'react/jsx-runtime', '@headless-geo/dashboard'],
+    external: ['react', 'react/jsx-runtime', '@garus-ltd/dashboard'],
     banner: { js: "'use client'" },
   },
 ])

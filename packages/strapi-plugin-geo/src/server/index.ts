@@ -11,7 +11,7 @@ import {
   type IPVerifier,
   type LlmsDocument,
   type StatsHit,
-} from '@headless-geo/core'
+} from '@garus-ltd/core'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
 import crawlerHitSchema from './content-types/crawler-hit/schema'
 import type { KoaContextLike, StrapiLike } from './types'

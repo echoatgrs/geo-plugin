@@ -5,7 +5,7 @@ export default {
     singularName: 'crawler-hit',
     pluralName: 'crawler-hits',
     displayName: 'AI Crawler Hit',
-    description: 'Requests from AI crawlers, reported by the @headless-geo/next proxy.',
+    description: 'Requests from AI crawlers, reported by the @garus-ltd/next proxy.',
   },
   options: { draftAndPublish: false },
   pluginOptions: {

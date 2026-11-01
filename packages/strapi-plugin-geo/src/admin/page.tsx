@@ -1,4 +1,4 @@
-import { GeoDashboard, type CrawlerStats } from '@headless-geo/dashboard'
+import { GeoDashboard, type CrawlerStats } from '@garus-ltd/dashboard'
 import { useFetchClient } from '@strapi/strapi/admin'
 import { useCallback } from 'react'
 

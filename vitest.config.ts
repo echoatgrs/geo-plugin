@@ -5,8 +5,8 @@ const src = (pkg: string, file: string) => new URL(`./packages/${pkg}/src/${file
 export default defineConfig({
   resolve: {
     alias: {
-      '@headless-geo/core': src('geo-core', 'index.ts'),
-      '@headless-geo/dashboard': src('geo-dashboard', 'index.tsx'),
+      '@garus-ltd/core': src('geo-core', 'index.ts'),
+      '@garus-ltd/dashboard': src('geo-dashboard', 'index.tsx'),
     },
   },
   test: { include: ['packages/*/src/**/*.test.{ts,tsx}'] },

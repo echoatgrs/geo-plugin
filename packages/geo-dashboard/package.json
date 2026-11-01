@@ -1,5 +1,5 @@
 {
-  "name": "@headless-geo/dashboard",
+  "name": "@garus-ltd/dashboard",
   "version": "0.1.0",
   "description": "Shared React dashboard for Headless GEO, rendered inside the Payload and Strapi admin panels.",
   "license": "MIT",
@@ -42,7 +42,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@headless-geo/core": "0.1.0"
+    "@garus-ltd/core": "0.1.0"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"

@@ -10,7 +10,7 @@ export function crawlerHitsCollection(overrides: Partial<CollectionConfig> = {})
       group: 'GEO',
       useAsTitle: 'path',
       defaultColumns: ['timestamp', 'botName', 'purpose', 'verification', 'path'],
-      description: 'Requests from AI crawlers, reported by the @headless-geo/next proxy.',
+      description: 'Requests from AI crawlers, reported by the @garus-ltd/next proxy.',
     },
     // Hits are written by the ingest endpoint with overrideAccess, never through the REST API.
     access: {

@@ -1,5 +1,5 @@
 {
-  "name": "@headless-geo/core",
+  "name": "@garus-ltd/core",
   "version": "0.1.0",
   "description": "CMS-agnostic core for Headless GEO: AI crawler detection, IP verification and hit ingestion.",
   "license": "MIT",

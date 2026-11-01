@@ -23,16 +23,16 @@ Visits fall into three kinds:
 
 | Package | What it is |
 | --- | --- |
-| [`@headless-geo/core`](packages/geo-core) | CMS-agnostic: bot list, IP verification, ingest, llms.txt builder, rich text to Markdown, stats |
-| [`@headless-geo/dashboard`](packages/geo-dashboard) | Shared React dashboard, rendered by both CMS adapters |
-| [`@headless-geo/next`](packages/geo-next) | Frontend SDK: proxy that reports AI crawler requests, and a route that serves llms.txt on your domain |
+| [`@garus-ltd/core`](packages/geo-core) | CMS-agnostic: bot list, IP verification, ingest, llms.txt builder, rich text to Markdown, stats |
+| [`@garus-ltd/dashboard`](packages/geo-dashboard) | Shared React dashboard, rendered by both CMS adapters |
+| [`@garus-ltd/next`](packages/geo-next) | Frontend SDK: proxy that reports AI crawler requests, and a route that serves llms.txt on your domain |
 | [`payload-plugin-geo`](packages/payload-plugin-geo) | Payload 3 adapter: hits collection, ingest / stats / llms endpoints, dashboard on admin home and hits list |
 | [`strapi-plugin-geo`](packages/strapi-plugin-geo) | Strapi 5 adapter: hits content type, ingest / stats / llms routes, "AI Visibility" admin page |
 
 A headless CMS never sees the requests to your frontend, so the frontend reports them:
 
 ```
-AI crawler ──▶ Next.js proxy (@headless-geo/next) ──waitUntil──▶ CMS /api/geo/ingest ──▶ your database
+AI crawler ──▶ Next.js proxy (@garus-ltd/next) ──waitUntil──▶ CMS /api/geo/ingest ──▶ your database
                  detects bot, does not block the page            re-checks UA, verifies IP
 ```
 
@@ -65,7 +65,7 @@ Run `payload generate:importmap` after installing so Payload finds the admin com
 
 ```ts
 // proxy.ts (Next 16) or middleware.ts (Next 15), in the same app
-import { withGeo } from '@headless-geo/next'
+import { withGeo } from '@garus-ltd/next'
 
 export const proxy = withGeo({ endpoint: '/api/geo/ingest', secret: process.env.GEO_SECRET })
 ```
@@ -95,7 +95,7 @@ The dashboard is under **AI Visibility** in the admin menu.
 
 ```ts
 // In your Next.js frontend: proxy.ts or middleware.ts
-import { withGeo } from '@headless-geo/next'
+import { withGeo } from '@garus-ltd/next'
 
 export const proxy = withGeo({
   endpoint: 'https://cms.example.com/api/geo/ingest',
@@ -110,7 +110,7 @@ so add a route in the frontend:
 
 ```ts
 // app/llms.txt/route.ts (and the same for app/llms-full.txt/route.ts)
-import { llmsRoute } from '@headless-geo/next'
+import { llmsRoute } from '@garus-ltd/next'
 
 export const GET = llmsRoute({ source: `${process.env.CMS_URL}/api/geo/llms.txt` })
 ```
@@ -122,7 +122,7 @@ converted to Markdown for llms-full.txt. Title, description and content fields a
 `titleField`, `descriptionField` and `contentField`.
 
 Already have middleware? Wrap it: `withGeo(options, yourMiddleware)`.
-`@headless-geo/next` only uses Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in a Cloudflare Worker.
+`@garus-ltd/next` only uses Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in a Cloudflare Worker.
 
 ## IP verification
 
@@ -157,6 +157,6 @@ MIT
 
 ## Releasing
 
-1. Bump `version` in each `packages/*/package.json` (and the internal `@headless-geo/*` dependency versions).
+1. Bump `version` in each `packages/*/package.json` (and the internal `@garus-ltd/*` dependency versions).
 2. Push a tag: `git tag v0.1.0 && git push origin v0.1.0`.
 3. The Release workflow builds, tests and publishes every package not yet on npm. It needs an `NPM_TOKEN` repository secret.

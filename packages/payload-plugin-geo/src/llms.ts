@@ -5,7 +5,7 @@ import {
   toLlmsDocument,
   type LlmsDocument,
   type LlmsSourceConfig,
-} from '@headless-geo/core'
+} from '@garus-ltd/core'
 import type { CollectionConfig, Payload, Where } from 'payload'
 
 export interface PayloadLlmsSource extends LlmsSourceConfig {
