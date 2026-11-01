@@ -119,4 +119,18 @@ describe('geoPlugin', () => {
       }),
     )
   })
+
+  it('skips collections the public cannot read instead of failing', async () => {
+    const withPrivate = geoPlugin({
+      verifyIPs: false,
+      llms: { siteURL: 'https://site.test', collections: { secrets: {}, posts: { url: (d) => `/blog/${d.slug}` } } },
+    })({ collections: [{ slug: 'secrets', fields: [] }, { slug: 'posts', fields: [] }] } as unknown as Config)
+    const { req, find } = fakeRequest({})
+    find.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('You are not allowed to perform this action.'), { status: 403 })
+    })
+    const res = await withPrivate.endpoints!.find((e) => e.path === '/geo/llms.txt')!.handler(req as never)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('[Hello](https://site.test/blog/hello)')
+  })
 })

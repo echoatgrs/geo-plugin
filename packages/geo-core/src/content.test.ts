@@ -120,4 +120,10 @@ describe('summarizeHits', () => {
     expect(stats.neverCrawled).toEqual(['/b', '/c'])
     expect(stats.coverage).toBeCloseTo(1 / 3)
   })
+
+  it('counts a read of the .md version as a read of the page', () => {
+    const stats = summarizeHits([hit({ path: '/blog/a.md' })], { days: 7, now, contentPaths: ['https://site.test/blog/a'] })
+    expect(stats.topPaths[0]).toMatchObject({ path: '/blog/a' })
+    expect(stats.neverCrawled).toEqual([])
+  })
 })

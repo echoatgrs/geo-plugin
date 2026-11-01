@@ -45,7 +45,9 @@ export function buildJsonLd(site: JsonLdSite, doc: LlmsDocument): JsonLd | null 
   if (isArticle) main.mainEntityOfPage = { '@type': 'WebPage', '@id': doc.url }
   if (doc.image) main.image = [doc.image]
   if (doc.publishedAt) main.datePublished = doc.publishedAt
-  if (doc.updatedAt) main.dateModified = doc.updatedAt
+  // Strapi sets publishedAt on every publish, a few ms after updatedAt; dateModified must not precede it.
+  const modified = [doc.updatedAt, doc.publishedAt].filter((d): d is string => !!d).sort((a, b) => Date.parse(b) - Date.parse(a))[0]
+  if (modified) main.dateModified = modified
   if (doc.authors?.length) main.author = doc.authors.map((name) => ({ '@type': 'Person', name }))
   else if (isArticle) main.author = { '@type': 'Organization', name: site.name, url: site.url }
   if (isArticle) main.publisher = publisher

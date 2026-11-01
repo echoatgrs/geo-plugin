@@ -112,6 +112,11 @@ describe('buildJsonLd', () => {
     expect((buildJsonLd(site, anon) as any)['@graph'][0].author).toEqual({ '@type': 'Organization', name: 'Acme', url: 'https://site.test' })
   })
 
+  it('never puts dateModified before datePublished', () => {
+    const doc = { ...post, publishedAt: '2026-11-01T16:33:19.074Z', updatedAt: '2026-11-01T16:33:19.065Z' }
+    expect((buildJsonLd(site, doc) as any)['@graph'][0].dateModified).toBe('2026-11-01T16:33:19.074Z')
+  })
+
   it('escapes < so content cannot close the script tag', () => {
     expect(serializeJsonLd({ a: '</script><script>' })).toBe('{"a":"\\u003c/script>\\u003cscript>"}')
   })

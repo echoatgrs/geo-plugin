@@ -60,16 +60,22 @@ async function queryCollection(
   if (source.where) filters.push(source.where)
   if (typeof config.versions === 'object' && config.versions.drafts) filters.push({ _status: { equals: 'published' } })
   if (extra) filters.push(extra)
-  const result = await payload.find({
-    collection: slug as never,
-    where: filters.length ? { and: filters } : undefined,
-    limit: source.limit ?? 500,
-    depth: 1,
-    // Anonymous read: only content the public can already see is served.
-    overrideAccess: false,
-    sort: '-updatedAt',
-  })
-  return result.docs as Record<string, any>[]
+  try {
+    const result = await payload.find({
+      collection: slug as never,
+      where: filters.length ? { and: filters } : undefined,
+      limit: source.limit ?? 500,
+      depth: 1,
+      // Anonymous read: only content the public can already see is served.
+      overrideAccess: false,
+      sort: '-updatedAt',
+    })
+    return result.docs as Record<string, any>[]
+  } catch (error) {
+    // Payload throws Forbidden when the public can't read the collection at all: list nothing from it.
+    if ((error as { status?: number })?.status === 403) return []
+    throw error
+  }
 }
 
 function mapDoc(doc: Record<string, any>, slug: string, source: PayloadLlmsSource, options: LlmsOptions, mediaURL?: string) {

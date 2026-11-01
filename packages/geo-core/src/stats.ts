@@ -1,5 +1,6 @@
 import { AI_BOTS, type BotPurpose } from './bots.js'
 import type { CrawlerHit } from './ingest.js'
+import { markdownSourcePath } from './llms.js'
 import type { Verification } from './verify.js'
 
 export type StatsHit = Pick<CrawlerHit, 'platform' | 'purpose' | 'verification' | 'path' | 'timestamp' | 'botId'>
@@ -84,7 +85,9 @@ export function summarizeHits(hits: StatsHit[], options: StatsOptions = {}): Cra
     const isUser = hit.purpose === 'user' ? 1 : 0
     total++
     byPurpose[hit.purpose]++
-    const path = normalizePath(hit.path)
+    // A read of `/blog/post.md` is a read of `/blog/post`.
+    const normalized = normalizePath(hit.path)
+    const path = markdownSourcePath(normalized) ?? normalized
     if (path === '/llms.txt' || path === '/llms-full.txt') llmsTxtReads++
     for (const [map, key] of [[platforms, hit.platform], [paths, path]] as const) {
       const entry = map.get(key) ?? { total: 0, user: 0 }
