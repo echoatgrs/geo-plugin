@@ -1,4 +1,15 @@
-import { AI_BOTS, GEO_SECRET_HEADER, detectBot, type BotDefinition, type HitInput } from '@garus-ltd/geo-core'
+import {
+  AI_BOTS,
+  GEO_SECRET_HEADER,
+  detectBot,
+  markdownSourcePath,
+  serializeJsonLd,
+  type BotDefinition,
+  type HitInput,
+  type JsonLd,
+} from '@garus-ltd/geo-core'
+
+export { serializeJsonLd, type JsonLd }
 
 /** Structural subset of Next's `NextFetchEvent`, so this also works in Cloudflare Workers and other Fetch runtimes. */
 export interface WaitUntilEvent {
@@ -15,6 +26,18 @@ export interface GeoTrackOptions {
   ignore?: (pathname: string) => boolean
   /** Called when reporting fails. Reporting never blocks or breaks the page response. */
   onError?: (error: unknown) => void
+  fetch?: typeof fetch
+  /** Serve the Markdown version of CMS pages at `/<path>.md` and to `Accept: text/markdown` requests. */
+  markdown?: MarkdownOptions
+}
+
+export interface MarkdownOptions {
+  /** CMS Markdown endpoint, e.g. `https://cms.example.com/api/geo/markdown`. Gets `?path=/blog/post`. */
+  source: string
+  /** Also answer `Accept: text/markdown` on the normal URL. Default true. */
+  negotiate?: boolean
+  /** Seconds browsers and CDNs may cache a page. Default 300. */
+  maxAge?: number
   fetch?: typeof fetch
 }
 
@@ -73,6 +96,46 @@ export function trackAICrawler(
 
 type Handler<R> = (request: Request, event: WaitUntilEvent) => R
 
+/** True when the client asks for Markdown over HTML, e.g. `Accept: text/markdown` or `text/markdown, text/html;q=0.8`. */
+export function prefersMarkdown(accept: string | null): boolean {
+  if (!accept) return false
+  let markdown = 0
+  let html = 0
+  for (const part of accept.toLowerCase().split(',')) {
+    const [type, ...params] = part.trim().split(';')
+    const q = Number(params.map((p) => p.trim()).find((p) => p.startsWith('q='))?.slice(2) ?? 1)
+    if (type === 'text/markdown' || type === 'text/x-markdown') markdown = Math.max(markdown, q)
+    if (type === 'text/html' || type === 'application/xhtml+xml') html = Math.max(html, q)
+  }
+  return markdown > 0 && markdown >= html
+}
+
+/**
+ * Markdown version of the requested page from the CMS, or null when the request is not for Markdown
+ * or the CMS has no published page at that path (so the app can handle it as usual).
+ */
+export async function markdownResponse(request: Request, options: MarkdownOptions): Promise<Response | null> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null
+  const url = new URL(request.url)
+  const mdPath = markdownSourcePath(url.pathname)
+  const negotiated = mdPath === null && options.negotiate !== false && prefersMarkdown(request.headers.get('accept'))
+  if (mdPath === null && !negotiated) return null
+  if (mdPath === null && STATIC_PATH.test(url.pathname)) return null
+
+  const source = new URL(options.source, url)
+  source.searchParams.set('path', mdPath ?? url.pathname)
+  const upstream = await (options.fetch ?? globalThis.fetch)(source, { headers: { accept: 'text/markdown' } }).catch(() => null)
+  if (!upstream?.ok) return null
+  const maxAge = options.maxAge ?? 300
+  const headers: Record<string, string> = {
+    'content-type': 'text/markdown; charset=utf-8',
+    'cache-control': `public, max-age=${maxAge}, stale-while-revalidate=${maxAge * 12}`,
+  }
+  if (negotiated) headers.vary = 'Accept'
+  else headers.link = `<${new URL(mdPath!, url).href}>; rel="canonical"`
+  return new Response(request.method === 'HEAD' ? null : await upstream.text(), { headers })
+}
+
 /**
  * Wraps an existing Next.js proxy / middleware, or acts as one on its own.
  *
@@ -82,10 +145,15 @@ type Handler<R> = (request: Request, event: WaitUntilEvent) => R
  * export const proxy = withGeo({ endpoint: process.env.GEO_INGEST_URL!, secret: process.env.GEO_SECRET })
  * ```
  */
-export function withGeo<R = undefined>(options: GeoTrackOptions, handler?: Handler<R>): Handler<R | undefined> {
+export function withGeo<R = undefined>(
+  options: GeoTrackOptions,
+  handler?: Handler<R>,
+): Handler<R | undefined | Promise<R | Response | undefined>> {
   return (request, event) => {
     trackAICrawler(request, event, options)
-    return handler?.(request, event)
+    if (!options.markdown) return handler?.(request, event)
+    const markdown = options.markdown
+    return markdownResponse(request, markdown).then((res) => res ?? handler?.(request, event))
   }
 }
 
@@ -122,4 +190,38 @@ export function llmsRoute(options: LlmsRouteOptions): (request: Request) => Prom
       },
     })
   }
+}
+
+export interface JsonLdOptions {
+  /** CMS JSON-LD endpoint, e.g. `https://cms.example.com/api/geo/jsonld`. */
+  source: string
+  /** Frontend path of the page, e.g. `/blog/hello`. */
+  path: string
+  /** Extra `fetch` options, e.g. `{ next: { revalidate: 300 } }` in Next.js. */
+  init?: RequestInit & Record<string, unknown>
+  fetch?: typeof fetch
+}
+
+/** JSON-LD for a page from the CMS, or null when the page has none. Never throws. */
+export async function fetchJsonLd(options: JsonLdOptions): Promise<JsonLd | null> {
+  const url = new URL(options.source)
+  url.searchParams.set('path', options.path)
+  try {
+    const res = await (options.fetch ?? globalThis.fetch)(url, { ...options.init, headers: { accept: 'application/ld+json' } })
+    return res.ok ? ((await res.json()) as JsonLd) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Props for a JSON-LD script tag, escaped so content cannot break out of it.
+ *
+ * ```tsx
+ * const data = await fetchJsonLd({ source: `${process.env.CMS_URL}/api/geo/jsonld`, path: `/blog/${slug}` })
+ * return <>{data && <script {...jsonLdScriptProps(data)} />}...</>
+ * ```
+ */
+export function jsonLdScriptProps(data: unknown): { type: 'application/ld+json'; dangerouslySetInnerHTML: { __html: string } } {
+  return { type: 'application/ld+json', dangerouslySetInnerHTML: { __html: serializeJsonLd(data) } }
 }

@@ -1,9 +1,13 @@
 import {
   GEO_SECRET_HEADER,
+  buildJsonLd,
   buildLlmsFullTxt,
   buildLlmsTxt,
   createIPVerifier,
+  documentMarkdown,
+  findDocumentByPath,
   ingestHits,
+  lastSegment,
   richTextToMarkdown,
   summarizeHits,
   toLlmsDocument,
@@ -33,24 +37,55 @@ function getConfig(strapi: StrapiLike): GeoStrapiConfig {
   }
 }
 
+type StrapiLlmsSource = StrapiLlmsConfig['contentTypes'][string]
+
+async function findEntries(strapi: StrapiLike, uid: string, source: StrapiLlmsSource, extra?: Record<string, unknown>) {
+  const filters = source.filters && extra ? { $and: [source.filters, extra] } : (extra ?? source.filters)
+  return strapi.documents(uid).findMany({
+    // Only published entries for draft & publish content types; ignored otherwise.
+    status: 'published',
+    filters,
+    // Relations and media (author, cover image, FAQ components) for JSON-LD.
+    populate: '*',
+    limit: source.limit ?? 500,
+    sort: 'updatedAt:desc',
+  })
+}
+
+function mapper(strapi: StrapiLike, llms: StrapiLlmsConfig, uid: string, source: StrapiLlmsSource) {
+  const name = strapi.contentType?.(uid)?.info?.pluralName ?? uid.split('.').pop() ?? uid
+  const mediaURL = llms.mediaURL ?? (strapi.config?.get<string>('server.url', '') || undefined)
+  return (entry: Record<string, any>) =>
+    toLlmsDocument(entry, { name, siteURL: llms.siteURL, source, markdown: richTextToMarkdown, mediaURL })
+}
+
 export async function loadLlmsDocuments(strapi: StrapiLike, llms: StrapiLlmsConfig): Promise<LlmsDocument[]> {
   const docs: LlmsDocument[] = []
   for (const [uid, source] of Object.entries(llms.contentTypes)) {
-    const contentType = strapi.contentType?.(uid)
-    const name = contentType?.info?.pluralName ?? uid.split('.').pop() ?? uid
-    const entries = await strapi.documents(uid).findMany({
-      // Only published entries for draft & publish content types; ignored otherwise.
-      status: 'published',
-      filters: source.filters,
-      limit: source.limit ?? 500,
-      sort: 'updatedAt:desc',
-    })
-    for (const entry of entries) {
-      const mapped = toLlmsDocument(entry, { name, siteURL: llms.siteURL, source, markdown: richTextToMarkdown })
+    const map = mapper(strapi, llms, uid, source)
+    for (const entry of await findEntries(strapi, uid, source)) {
+      const mapped = map(entry)
       if (mapped) docs.push(mapped)
     }
   }
   return docs
+}
+
+/**
+ * The published entry served at a frontend path. Content types with a `slug` attribute are
+ * queried by the path's last segment; others are scanned.
+ */
+export async function loadDocumentByPath(strapi: StrapiLike, llms: StrapiLlmsConfig, path: string): Promise<LlmsDocument | undefined> {
+  const slug = lastSegment(path)
+  for (const [uid, source] of Object.entries(llms.contentTypes)) {
+    const bySlug = !!strapi.contentType?.(uid)?.attributes?.slug
+    if (bySlug && !slug) continue
+    const map = mapper(strapi, llms, uid, source)
+    const entries = await findEntries(strapi, uid, source, bySlug ? { slug: { $eq: slug } } : undefined)
+    const match = findDocumentByPath(entries.map(map).filter((d): d is LlmsDocument => !!d), path)
+    if (match) return match
+  }
+  return undefined
 }
 
 async function loadHits(strapi: StrapiLike, days: number): Promise<StatsHit[]> {
@@ -70,11 +105,16 @@ async function loadHits(strapi: StrapiLike, days: number): Promise<StatsHit[]> {
   return hits
 }
 
-function sendText(ctx: KoaContextLike, body: string) {
-  ctx.set?.('Content-Type', 'text/plain; charset=utf-8')
-  ctx.set?.('Cache-Control', 'public, max-age=300')
-  ctx.status = 200
+function sendText(ctx: KoaContextLike, body: string, type = 'text/plain', status = 200) {
+  ctx.set?.('Content-Type', `${type}; charset=utf-8`)
+  ctx.set?.('Cache-Control', `public, max-age=${status === 200 ? 300 : 60}`)
+  ctx.status = status
   ctx.body = body
+}
+
+function pathQuery(ctx: KoaContextLike): string | null {
+  const path = ctx.query?.path
+  return typeof path === 'string' && path.startsWith('/') ? path : null
 }
 
 export const controllers = {
@@ -111,11 +151,42 @@ export const controllers = {
       }
       const docs = await loadLlmsDocuments(strapi, llms)
       const site = { name: llms.name ?? llms.siteURL, description: llms.description, details: llms.details }
-      sendText(ctx, full ? buildLlmsFullTxt(site, docs) : buildLlmsTxt(site, docs))
+      sendText(ctx, full ? buildLlmsFullTxt(site, docs) : buildLlmsTxt(site, docs, { markdownLinks: llms.markdownLinks }))
     }
     return {
       llmsTxt: (ctx: KoaContextLike) => render(ctx, false),
       llmsFullTxt: (ctx: KoaContextLike) => render(ctx, true),
+    }
+  },
+
+  page: ({ strapi }: { strapi: StrapiLike }) => {
+    const find = async (ctx: KoaContextLike) => {
+      const { llms } = getConfig(strapi)
+      const path = pathQuery(ctx)
+      if (!llms || !path) {
+        sendText(ctx, llms ? '`path` query parameter is required\n' : 'llms is not configured\n', 'text/plain', llms ? 400 : 404)
+        return null
+      }
+      const doc = await loadDocumentByPath(strapi, llms, path)
+      if (!doc) sendText(ctx, 'Not found\n', 'text/plain', 404)
+      return doc ? { llms, doc } : null
+    }
+    return {
+      async markdown(ctx: KoaContextLike) {
+        const found = await find(ctx)
+        if (found) sendText(ctx, documentMarkdown(found.doc), 'text/markdown')
+      },
+      async jsonLd(ctx: KoaContextLike) {
+        const found = await find(ctx)
+        if (!found) return
+        const { llms, doc } = found
+        const data = buildJsonLd(
+          { name: llms.name ?? llms.siteURL, url: llms.siteURL, logo: llms.logo, language: llms.language },
+          doc,
+        )
+        if (!data) return sendText(ctx, 'Not found\n', 'text/plain', 404)
+        sendText(ctx, JSON.stringify(data), 'application/ld+json')
+      },
     }
   },
 
@@ -148,6 +219,8 @@ export const routes = {
       publicRoute('POST', '/ingest', 'ingest.ingest'),
       publicRoute('GET', '/llms.txt', 'llms.llmsTxt'),
       publicRoute('GET', '/llms-full.txt', 'llms.llmsFullTxt'),
+      publicRoute('GET', '/markdown', 'page.markdown'),
+      publicRoute('GET', '/jsonld', 'page.jsonLd'),
     ],
   },
   admin: {

@@ -100,7 +100,35 @@ describe('strapi-plugin-geo', () => {
       'POST /ingest',
       'GET /llms.txt',
       'GET /llms-full.txt',
+      'GET /markdown',
+      'GET /jsonld',
     ])
     expect(plugin.routes.admin.routes[0]).toMatchObject({ path: '/stats', config: { policies: ['admin::isAuthenticatedAdmin'] } })
+  })
+
+  it('serves per-page Markdown and JSON-LD for published entries, queried by slug', async () => {
+    const { strapi, findMany } = fakeStrapi({ llms: { ...llms, contentTypes: { [ARTICLE]: { url: (d: any) => `/blog/${d.slug}`, jsonLd: { type: 'BlogPosting' } } } } }, { [ARTICLE]: articles })
+    strapi.contentType = () => ({ info: { pluralName: 'articles' }, attributes: { slug: { type: 'uid' } } })
+    const md = ctx(undefined, '', { path: '/blog/hello' })
+    await controllers.page({ strapi }).markdown(md)
+    expect(md.status).toBe(200)
+    expect(md.headers['Content-Type']).toContain('text/markdown')
+    expect(md.body).toBe('# Hello\n\nURL: https://site.test/blog/hello\n\n> First post\n\nHi there\n')
+    expect(findMany).toHaveBeenCalledWith(ARTICLE, expect.objectContaining({ status: 'published', filters: { slug: { $eq: 'hello' } } }))
+
+    const ld = ctx(undefined, '', { path: '/blog/hello' })
+    await controllers.page({ strapi }).jsonLd(ld)
+    expect(ld.headers['Content-Type']).toContain('application/ld+json')
+    expect(JSON.parse(ld.body as string)).toMatchObject({ '@graph': [{ '@type': 'BlogPosting', headline: 'Hello' }] })
+  })
+
+  it('returns 404 for unknown pages and 400 without a path', async () => {
+    const { strapi } = fakeStrapi({ llms }, { [ARTICLE]: articles })
+    const missing = ctx(undefined, '', { path: '/articles/nope' })
+    await controllers.page({ strapi }).markdown(missing)
+    expect(missing.status).toBe(404)
+    const bad = ctx(undefined, '', {})
+    await controllers.page({ strapi }).jsonLd(bad)
+    expect(bad.status).toBe(400)
   })
 })

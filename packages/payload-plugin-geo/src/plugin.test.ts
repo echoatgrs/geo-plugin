@@ -41,6 +41,8 @@ describe('geoPlugin', () => {
       'get /geo/stats',
       'get /geo/llms.txt',
       'get /geo/llms-full.txt',
+      'get /geo/markdown',
+      'get /geo/jsonld',
     ])
     expect(config.admin?.components?.beforeDashboard?.[0]).toMatchObject({
       path: 'payload-plugin-geo/client#GeoDashboardClient',
@@ -80,5 +82,41 @@ describe('geoPlugin', () => {
     expect((await endpoint('/geo/stats').handler(fakeRequest({}).req as never)).status).toBe(401)
     const res = await endpoint('/geo/stats').handler(fakeRequest({ user: { id: 1 } }).req as never)
     expect(await res.json()).toMatchObject({ total: 1, coverage: 0.5, neverCrawled: ['/blog/two'] })
+  })
+
+  it('serves the Markdown version of a published page by path', async () => {
+    const { req } = fakeRequest({ url: 'http://cms.test/api/geo/markdown?path=/blog/hello' })
+    const res = await endpoint('/geo/markdown').handler(req as never)
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    expect(await res.text()).toBe('# Hello\n\nURL: https://site.test/blog/hello\n\n> First\n\nBody\n')
+
+    const missing = await endpoint('/geo/markdown').handler(fakeRequest({ url: 'http://cms.test/api/geo/markdown?path=/nope' }).req as never)
+    expect(missing.status).toBe(404)
+    const bad = await endpoint('/geo/markdown').handler(fakeRequest({ url: 'http://cms.test/api/geo/markdown' }).req as never)
+    expect(bad.status).toBe(400)
+  })
+
+  it('serves JSON-LD for a page', async () => {
+    const res = await endpoint('/geo/jsonld').handler(fakeRequest({ url: 'http://cms.test/api/geo/jsonld?path=/blog/two' }).req as never)
+    expect(res.headers.get('content-type')).toContain('application/ld+json')
+    expect(await res.json()).toMatchObject({ '@graph': [{ '@type': 'Article', headline: 'Draftless', url: 'https://site.test/blog/two' }] })
+  })
+
+  it('queries by slug when the collection has a slug field, and keeps the published filter', async () => {
+    const withSlug = geoPlugin({
+      verifyIPs: false,
+      llms: { siteURL: 'https://site.test', collections: { posts: { url: (d) => `/blog/${d.slug}` } } },
+    })({
+      collections: [{ slug: 'posts', fields: [{ type: 'row', fields: [{ name: 'slug', type: 'text' }] }], versions: { drafts: true } }],
+    } as unknown as Config)
+    const { req, find } = fakeRequest({ url: 'http://cms.test/api/geo/markdown?path=/blog/hello' })
+    const res = await withSlug.endpoints!.find((e) => e.path === '/geo/markdown')!.handler(req as never)
+    expect(res.status).toBe(200)
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        overrideAccess: false,
+        where: { and: [{ _status: { equals: 'published' } }, { slug: { equals: 'hello' } }] },
+      }),
+    )
   })
 })

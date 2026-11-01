@@ -14,13 +14,26 @@ export { lexicalToMarkdown, richTextToMarkdown, strapiBlocksToMarkdown } from '.
 export {
   buildLlmsFullTxt,
   buildLlmsTxt,
+  documentMarkdown,
   getField,
   joinURL,
+  markdownSourcePath,
+  markdownURL,
   toLlmsDocument,
+  type JsonLdSourceConfig,
   type LlmsDocument,
   type LlmsSite,
   type LlmsSourceConfig,
+  type LlmsTxtOptions,
 } from './llms.js'
+export {
+  buildJsonLd,
+  findDocumentByPath,
+  lastSegment,
+  serializeJsonLd,
+  type JsonLd,
+  type JsonLdSite,
+} from './jsonld.js'
 export {
   KNOWN_PLATFORMS,
   normalizePath,

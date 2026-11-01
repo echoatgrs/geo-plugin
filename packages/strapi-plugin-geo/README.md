@@ -1,6 +1,6 @@
 # strapi-plugin-geo
 
-[Headless GEO](https://github.com/echoatgrs/geo-plugin) for Strapi 5: see which AI crawlers read your frontend, serve llms.txt from your content, and get an "AI Visibility" page in the admin.
+[Headless GEO](https://github.com/echoatgrs/geo-plugin) for Strapi 5: see which AI crawlers read your frontend, serve llms.txt, per-page Markdown and JSON-LD from your content, and get an "AI Visibility" page in the admin.
 
 ```sh
 npm install strapi-plugin-geo

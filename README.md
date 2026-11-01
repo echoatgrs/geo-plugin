@@ -2,13 +2,15 @@
 
 Make headless sites visible to AI, and see in your CMS which AI crawlers read which pages.
 
-It does three things:
+It does four things:
 
 1. **AI crawler logs.** It records visits from GPTBot, ClaudeBot,
 PerplexityBot, ChatGPT-User and others, checks their IPs against the vendors' published ranges,
 and separates three kinds of visits (table below).
 2. **llms.txt and llms-full.txt**, generated from your published CMS content.
-3. **An AI visibility dashboard** inside the Payload or Strapi admin: visits per platform, live user fetches,
+3. **Per-page Markdown and JSON-LD.** Every published article is available as Markdown (`/blog/post.md`, or the
+   normal URL with `Accept: text/markdown`), and as schema.org JSON-LD (Article / BlogPosting / FAQPage...) for the page's `<head>`.
+4. **An AI visibility dashboard** inside the Payload or Strapi admin: visits per platform, live user fetches,
    content coverage, and the list of pages no AI has crawled.
 
 Visits fall into three kinds:
@@ -121,6 +123,67 @@ converted to Markdown for llms-full.txt. Title, description and content fields a
 (`title`, `description` / `excerpt` / `summary`, `content` / `body`) and can be set with
 `titleField`, `descriptionField` and `contentField`.
 
+## Markdown version of each page
+
+The CMS serves `/api/geo/markdown?path=/blog/post` for every page listed in llms.txt (same rules: published and
+publicly readable only, drafts never). Let the frontend proxy serve it on your domain:
+
+```ts
+// proxy.ts / middleware.ts
+export const proxy = withGeo({
+  endpoint: `${process.env.CMS_URL}/api/geo/ingest`,
+  secret: process.env.GEO_SECRET,
+  markdown: { source: `${process.env.CMS_URL}/api/geo/markdown` },
+})
+```
+
+Now `/blog/post.md` returns the article as Markdown, and so does `/blog/post` when the request sends
+`Accept: text/markdown` (set `negotiate: false` to turn that off). Paths the CMS doesn't know fall through to your app.
+Set `llms.markdownLinks: true` in the CMS to point llms.txt entries at the `.md` URLs. To advertise the Markdown
+version, add `alternates: { types: { 'text/markdown': '/blog/post.md' } }` to the page's Next.js metadata.
+
+Collections / content types with a `slug` field are looked up by the last path segment; others are scanned, so
+give large collections a `slug`.
+
+## JSON-LD
+
+The CMS serves `/api/geo/jsonld?path=/blog/post` (`application/ld+json`). Render it in the page:
+
+```tsx
+// app/blog/[slug]/page.tsx
+import { fetchJsonLd, jsonLdScriptProps } from '@garus-ltd/geo-next'
+
+export default async function Post({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const jsonLd = await fetchJsonLd({ source: `${process.env.CMS_URL}/api/geo/jsonld`, path: `/blog/${slug}` })
+  return (
+    <article>
+      {jsonLd && <script {...jsonLdScriptProps(jsonLd)} />}
+      {/* ... */}
+    </article>
+  )
+}
+```
+
+Configure it per collection / content type in the `llms` options:
+
+```ts
+posts: {
+  url: (doc) => `/blog/${doc.slug}`,
+  jsonLd: { type: 'BlogPosting', extend: (doc) => ({ keywords: doc.tags?.map((t) => t.name) }) },
+  faqField: 'faq',          // array of { question, answer } -> FAQPage, and a FAQ section in the Markdown
+  authorField: 'author',    // string, { name }, or a list; default `author` / `authors`
+  imageField: 'heroImage',  // URL or upload/media object; default `image`, `heroImage`, `coverImage`, `cover`, ...
+},
+pages: { jsonLd: { type: 'WebPage' } },
+```
+
+The default type is `Article`; `jsonLd: false` turns it off. `headline`, `description`, `datePublished`
+(`publishedAt` / `publishedDate` / `createdAt`), `dateModified`, `author` (falls back to your organization), `image`
+and `publisher` are filled in. Site-wide `llms.logo`, `llms.language` and `llms.mediaURL` (base for relative upload
+URLs, default the CMS server URL) are optional. The core builder `buildJsonLd(site, doc)` is exported from
+`@garus-ltd/geo-core` if you'd rather build it in the frontend.
+
 Already have middleware? Wrap it: `withGeo(options, yourMiddleware)`.
 `@garus-ltd/geo-next` only uses Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in a Cloudflare Worker.
 
@@ -147,8 +210,8 @@ npm run typecheck
 ## Roadmap
 
 1. ~~AI crawler logs~~
-2. ~~`llms.txt`, `llms-full.txt`~~, Markdown version of each page (`/xxx.md`)
-3. JSON-LD from config presets (Article, FAQ)
+2. ~~`llms.txt`, `llms-full.txt`, Markdown version of each page (`/xxx.md`)~~
+3. ~~JSON-LD from config presets (Article, FAQ)~~, more presets (Product, HowTo, BreadcrumbList)
 4. ~~Admin dashboard~~, per-document sidebar in the editor
 
 ## License

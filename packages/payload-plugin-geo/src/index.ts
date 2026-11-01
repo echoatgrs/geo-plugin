@@ -10,7 +10,15 @@ import {
 } from '@garus-ltd/geo-core'
 import type { CollectionConfig, Config, Endpoint, Plugin } from 'payload'
 import { CRAWLER_HITS_SLUG, crawlerHitsCollection } from './collection.js'
-import { loadLlmsDocuments, renderLlms, type LlmsOptions, type PayloadLlmsSource } from './llms.js'
+import {
+  loadDocumentByPath,
+  loadLlmsDocuments,
+  renderJsonLd,
+  renderLlms,
+  renderMarkdown,
+  type LlmsOptions,
+  type PayloadLlmsSource,
+} from './llms.js'
 
 export interface GeoPluginOptions {
   /** Shared secret the frontend proxy sends. Strongly recommended when the frontend is on another host. */
@@ -31,15 +39,20 @@ export interface GeoPluginOptions {
   enabled?: boolean
 }
 
-export { CRAWLER_HITS_SLUG, crawlerHitsCollection, type LlmsOptions, type PayloadLlmsSource }
+export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsDocuments, type LlmsOptions, type PayloadLlmsSource }
 
 const MAX_STATS_HITS = 100_000
 
-function text(body: string, status = 200): Response {
+function text(body: string, status = 200, type = 'text/plain'): Response {
   return new Response(body, {
     status,
-    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=300' },
+    headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': `public, max-age=${status === 200 ? 300 : 60}` },
   })
+}
+
+function pathParam(req: { url?: string }): string | null {
+  const path = new URL(req.url ?? '', 'http://x').searchParams.get('path')
+  return path && path.startsWith('/') ? path : null
 }
 
 export const geoPlugin =
@@ -92,7 +105,7 @@ export const geoPlugin =
           overrideAccess: true,
         })
         const contentPaths = options.llms
-          ? (await loadLlmsDocuments(req.payload, options.llms, collections)).map((d) => d.url)
+          ? (await loadLlmsDocuments(req.payload, options.llms, collections, config.serverURL)).map((d) => d.url)
           : undefined
         return Response.json(summarizeHits(result.docs as unknown as StatsHit[], { days, contentPaths }))
       },
@@ -105,9 +118,37 @@ export const geoPlugin =
         endpoints.push({
           path: full ? '/geo/llms-full.txt' : '/geo/llms.txt',
           method: 'get',
-          handler: async (req) => text(renderLlms(llms, await loadLlmsDocuments(req.payload, llms, collections), full)),
+          handler: async (req) =>
+            text(renderLlms(llms, await loadLlmsDocuments(req.payload, llms, collections, config.serverURL), full)),
         })
       }
+      // Per-page Markdown and JSON-LD: `?path=/blog/post` (the frontend path, without `.md`).
+      endpoints.push(
+        {
+          path: '/geo/markdown',
+          method: 'get',
+          handler: async (req) => {
+            const path = pathParam(req)
+            if (!path) return text('`path` query parameter is required\n', 400)
+            const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
+            return doc ? text(renderMarkdown(doc), 200, 'text/markdown') : text('Not found\n', 404)
+          },
+        },
+        {
+          path: '/geo/jsonld',
+          method: 'get',
+          handler: async (req) => {
+            const path = pathParam(req)
+            if (!path) return Response.json({ error: '`path` query parameter is required' }, { status: 400 })
+            const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
+            const data = doc ? renderJsonLd(llms, doc) : null
+            if (!data) return Response.json({ error: 'not found' }, { status: 404, headers: { 'cache-control': 'public, max-age=60' } })
+            return new Response(JSON.stringify(data), {
+              headers: { 'content-type': 'application/ld+json; charset=utf-8', 'cache-control': 'public, max-age=300' },
+            })
+          },
+        },
+      )
     }
 
     if (options.dashboard !== false) {

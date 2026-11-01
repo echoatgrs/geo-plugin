@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getClientIP, withGeo } from './index.js'
+import { fetchJsonLd, getClientIP, jsonLdScriptProps, markdownResponse, prefersMarkdown, withGeo } from './index.js'
 
 const GPTBOT = 'Mozilla/5.0; compatible; GPTBot/1.2; +https://openai.com/gptbot'
 
@@ -71,5 +71,43 @@ describe('llmsRoute', () => {
       new Request('https://site.test/llms.txt'),
     )
     expect(res.status).toBe(502)
+  })
+})
+
+describe('markdown', () => {
+  const cms = vi.fn(async (url: URL) =>
+    url.searchParams.get('path') === '/blog/hello' ? new Response('# Hello\n') : new Response('Not found', { status: 404 }),
+  )
+  const options = { source: 'https://cms.test/api/geo/markdown', fetch: cms as never }
+
+  it('serves /path.md from the CMS', async () => {
+    const res = (await markdownResponse(new Request('https://site.test/blog/hello.md'), options))!
+    expect(await res.text()).toBe('# Hello\n')
+    expect(res.headers.get('content-type')).toContain('text/markdown')
+    expect(res.headers.get('link')).toBe('<https://site.test/blog/hello>; rel="canonical"')
+  })
+
+  it('negotiates Accept: text/markdown on the normal URL', async () => {
+    const res = (await markdownResponse(new Request('https://site.test/blog/hello', { headers: { accept: 'text/markdown, text/html;q=0.5' } }), options))!
+    expect(res.headers.get('vary')).toBe('Accept')
+    expect(await markdownResponse(new Request('https://site.test/blog/hello', { headers: { accept: 'text/html,*/*' } }), options)).toBeNull()
+    expect(prefersMarkdown('text/html, text/markdown;q=0.9')).toBe(false)
+    expect(prefersMarkdown('text/markdown')).toBe(true)
+  })
+
+  it('falls through to the app when the CMS has no such page', async () => {
+    const { event } = setup()
+    const handler = vi.fn(() => 'next')
+    const proxy = withGeo({ endpoint: '/api/geo/ingest', markdown: options }, handler)
+    expect(await proxy(new Request('https://site.test/docs/readme.md'), event)).toBe('next')
+    const res = await proxy(new Request('https://site.test/blog/hello.md'), event)
+    expect(res).toBeInstanceOf(Response)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('fetches JSON-LD and builds safe script props', async () => {
+    const fetch = vi.fn(async (url: URL) => Response.json({ path: url.searchParams.get('path') }))
+    expect(await fetchJsonLd({ source: 'https://cms.test/api/geo/jsonld', path: '/blog/hello', fetch: fetch as never })).toEqual({ path: '/blog/hello' })
+    expect(jsonLdScriptProps({ a: '</script>' }).dangerouslySetInnerHTML.__html).toBe('{"a":"\\u003c/script>"}')
   })
 })

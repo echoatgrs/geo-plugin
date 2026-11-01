@@ -1,12 +1,17 @@
 import {
+  buildJsonLd,
   buildLlmsFullTxt,
   buildLlmsTxt,
+  documentMarkdown,
+  findDocumentByPath,
+  lastSegment,
   richTextToMarkdown,
   toLlmsDocument,
+  type JsonLd,
   type LlmsDocument,
   type LlmsSourceConfig,
 } from '@garus-ltd/geo-core'
-import type { CollectionConfig, Payload, Where } from 'payload'
+import type { CollectionConfig, Field, Payload, Where } from 'payload'
 
 export interface PayloadLlmsSource extends LlmsSourceConfig {
   /** Extra filter, e.g. `{ noindex: { not_equals: true } }`. */
@@ -24,41 +29,124 @@ export interface LlmsOptions {
   details?: string
   /** Collections to list, keyed by slug. */
   collections: Record<string, PayloadLlmsSource>
+  /** Logo for the JSON-LD publisher, absolute or a path on the site. */
+  logo?: string
+  /** Content language for JSON-LD, e.g. `en`. */
+  language?: string
+  /** Base for relative upload URLs. Default: Payload `serverURL`, else `siteURL`. */
+  mediaURL?: string
+  /** Link llms.txt entries to the `.md` version of each page. Turn on once the frontend serves them. Default false. */
+  markdownLinks?: boolean
+}
+
+/** Whether a collection has a top-level `slug` field (rows, collapsibles and unnamed tabs count as top level). */
+function hasField(fields: Field[] | undefined, name: string): boolean {
+  return (fields ?? []).some((f: any) => {
+    if (f.name === name) return true
+    if ((f.type === 'row' || f.type === 'collapsible') && hasField(f.fields, name)) return true
+    if (f.type === 'tabs') return (f.tabs ?? []).some((t: any) => !t.name && hasField(t.fields, name))
+    return false
+  })
+}
+
+async function queryCollection(
+  payload: Payload,
+  slug: string,
+  config: CollectionConfig,
+  source: PayloadLlmsSource,
+  extra?: Where,
+): Promise<Record<string, any>[]> {
+  const filters: Where[] = []
+  if (source.where) filters.push(source.where)
+  if (typeof config.versions === 'object' && config.versions.drafts) filters.push({ _status: { equals: 'published' } })
+  if (extra) filters.push(extra)
+  const result = await payload.find({
+    collection: slug as never,
+    where: filters.length ? { and: filters } : undefined,
+    limit: source.limit ?? 500,
+    depth: 1,
+    // Anonymous read: only content the public can already see is served.
+    overrideAccess: false,
+    sort: '-updatedAt',
+  })
+  return result.docs as Record<string, any>[]
+}
+
+function mapDoc(doc: Record<string, any>, slug: string, source: PayloadLlmsSource, options: LlmsOptions, mediaURL?: string) {
+  return toLlmsDocument(doc, {
+    name: slug,
+    siteURL: options.siteURL,
+    source,
+    markdown: richTextToMarkdown,
+    mediaURL: options.mediaURL ?? mediaURL,
+  })
+}
+
+function sources(payload: Payload, options: LlmsOptions, collections: CollectionConfig[]) {
+  return Object.entries(options.collections).flatMap(([slug, source]) => {
+    const config = collections.find((c) => c.slug === slug)
+    if (!config) {
+      payload.logger.warn(`[geo] llms collection "${slug}" does not exist`)
+      return []
+    }
+    return [{ slug, source, config }]
+  })
 }
 
 export async function loadLlmsDocuments(
   payload: Payload,
   options: LlmsOptions,
   collections: CollectionConfig[],
+  mediaURL?: string,
 ): Promise<LlmsDocument[]> {
   const docs: LlmsDocument[] = []
-  for (const [slug, source] of Object.entries(options.collections)) {
-    const config = collections.find((c) => c.slug === slug)
-    if (!config) {
-      payload.logger.warn(`[geo] llms collection "${slug}" does not exist`)
-      continue
-    }
-    const filters: Where[] = []
-    if (source.where) filters.push(source.where)
-    if (typeof config.versions === 'object' && config.versions.drafts) filters.push({ _status: { equals: 'published' } })
-    const result = await payload.find({
-      collection: slug as never,
-      where: filters.length ? { and: filters } : undefined,
-      limit: source.limit ?? 500,
-      depth: 1,
-      // Anonymous read: only content the public can already see ends up in llms.txt.
-      overrideAccess: false,
-      sort: '-updatedAt',
-    })
-    for (const doc of result.docs as Record<string, any>[]) {
-      const mapped = toLlmsDocument(doc, { name: slug, siteURL: options.siteURL, source, markdown: richTextToMarkdown })
+  for (const { slug, source, config } of sources(payload, options, collections)) {
+    for (const doc of await queryCollection(payload, slug, config, source)) {
+      const mapped = mapDoc(doc, slug, source, options, mediaURL)
       if (mapped) docs.push(mapped)
     }
   }
   return docs
 }
 
+/**
+ * The published, publicly readable document served at a frontend path.
+ * Collections with a `slug` field are queried by the path's last segment; others are scanned.
+ */
+export async function loadDocumentByPath(
+  payload: Payload,
+  options: LlmsOptions,
+  collections: CollectionConfig[],
+  path: string,
+  mediaURL?: string,
+): Promise<LlmsDocument | undefined> {
+  const slugValue = lastSegment(path)
+  for (const { slug, source, config } of sources(payload, options, collections)) {
+    const bySlug = hasField(config.fields, 'slug')
+    if (bySlug && !slugValue) continue
+    const docs = await queryCollection(payload, slug, config, source, bySlug ? { slug: { equals: slugValue } } : undefined)
+    const mapped = docs.map((d) => mapDoc(d, slug, source, options, mediaURL)).filter((d): d is LlmsDocument => !!d)
+    const match = findDocumentByPath(mapped, path)
+    if (match) return match
+  }
+  return undefined
+}
+
+function site(options: LlmsOptions) {
+  return { name: options.name ?? options.siteURL, description: options.description, details: options.details }
+}
+
 export function renderLlms(options: LlmsOptions, docs: LlmsDocument[], full: boolean): string {
-  const site = { name: options.name ?? options.siteURL, description: options.description, details: options.details }
-  return full ? buildLlmsFullTxt(site, docs) : buildLlmsTxt(site, docs)
+  return full ? buildLlmsFullTxt(site(options), docs) : buildLlmsTxt(site(options), docs, { markdownLinks: options.markdownLinks })
+}
+
+export function renderMarkdown(doc: LlmsDocument): string {
+  return documentMarkdown(doc)
+}
+
+export function renderJsonLd(options: LlmsOptions, doc: LlmsDocument): JsonLd | null {
+  return buildJsonLd(
+    { name: options.name ?? options.siteURL, url: options.siteURL, logo: options.logo, language: options.language },
+    doc,
+  )
 }

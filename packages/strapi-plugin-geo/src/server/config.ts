@@ -15,6 +15,14 @@ export interface StrapiLlmsConfig {
   details?: string
   /** Content types to list, keyed by UID, e.g. `'api::article.article'`. */
   contentTypes: Record<string, StrapiLlmsSource>
+  /** Logo for the JSON-LD publisher, absolute or a path on the site. */
+  logo?: string
+  /** Content language for JSON-LD, e.g. `en`. */
+  language?: string
+  /** Base for relative media URLs such as `/uploads/a.png`, usually the Strapi URL. Default: Strapi `server.url`, else `siteURL`. */
+  mediaURL?: string
+  /** Link llms.txt entries to the `.md` version of each page. Turn on once the frontend serves them. Default false. */
+  markdownLinks?: boolean
 }
 
 export interface GeoStrapiConfig {

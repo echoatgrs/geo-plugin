@@ -8,8 +8,11 @@ export interface DocumentServiceLike {
 export interface StrapiLike {
   plugin(name: string): { config<T = unknown>(key: string, defaultValue?: T): T }
   documents(uid: string): DocumentServiceLike
-  contentType?(uid: string): { info?: { pluralName?: string }; options?: { draftAndPublish?: boolean } } | undefined
+  contentType?(uid: string):
+    | { info?: { pluralName?: string }; options?: { draftAndPublish?: boolean }; attributes?: Record<string, unknown> }
+    | undefined
   log: { warn(message: string): void; info(message: string): void }
+  config?: { get<T = unknown>(key: string, defaultValue?: T): T }
 }
 
 export interface KoaContextLike {
