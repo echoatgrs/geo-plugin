@@ -10,12 +10,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      # npm Trusted Publishing: npm exchanges this workflow's OIDC token for a short-lived publish credential,
+      # so no NPM_TOKEN secret is stored. Each package must list this repo and release.yml as a trusted publisher.
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Trusted Publishing needs npm 11.5.1 or newer, which ships with Node 24.
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
@@ -30,8 +33,6 @@ jobs:
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name@$version already published, skipping"
             else
-              npm publish --workspace "packages/$pkg" --access public --provenance
+              npm publish --workspace "packages/$pkg" --access public
             fi
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -159,4 +159,10 @@ MIT
 
 1. Bump `version` in each `packages/*/package.json` (and the internal `@garus-ltd/*` dependency versions).
 2. Push a tag: `git tag v0.1.0 && git push origin v0.1.0`.
-3. The Release workflow builds, tests and publishes every package not yet on npm. It needs an `NPM_TOKEN` repository secret.
+3. The Release workflow builds, tests and publishes every package not yet on npm, using
+   [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (no token stored).
+
+One-time setup: npm only lets you add a trusted publisher to a package that already exists, so the first
+version of each package is published by hand (`npm login`, then `npm publish -w packages/<pkg> --access public`).
+Then, on npmjs.com, open each package's **Settings → Trusted Publisher**, choose GitHub Actions, and enter
+owner `echoatgrs`, repository `geo-plugin`, workflow `release.yml`.
