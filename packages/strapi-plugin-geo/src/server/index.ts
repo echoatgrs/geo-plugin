@@ -39,6 +39,45 @@ function getConfig(strapi: StrapiLike): GeoStrapiConfig {
 
 type StrapiLlmsSource = StrapiLlmsConfig['contentTypes'][string]
 
+const PUBLIC_ROLE_UID = 'plugin::users-permissions.role'
+const warned = new Set<string>()
+
+function warnOnce(strapi: StrapiLike, message: string) {
+  if (warned.has(message)) return
+  warned.add(message)
+  strapi.log.warn(message)
+}
+
+/**
+ * Content types from the config that the Public role may read. Without the Users & Permissions plugin
+ * the REST API is closed to anonymous visitors, so nothing is public.
+ */
+export async function publicContentTypes(strapi: StrapiLike, llms: StrapiLlmsConfig): Promise<Set<string>> {
+  const uids = Object.keys(llms.contentTypes)
+  if (llms.publicOnly === false) return new Set(uids)
+  let role: Record<string, any> | null = null
+  if (strapi.db && strapi.contentType?.(PUBLIC_ROLE_UID)) {
+    role = await strapi.db.query(PUBLIC_ROLE_UID).findOne({ where: { type: 'public' }, populate: ['permissions'] })
+  }
+  if (!role) {
+    warnOnce(strapi, '[geo] No Users & Permissions Public role found, so llms.txt lists nothing. Set `llms.publicOnly: false` to serve the configured content types anyway.')
+    return new Set()
+  }
+  const actions = new Set<string>((role.permissions ?? []).map((p: { action?: string }) => p.action))
+  const allowed = new Set(uids.filter((uid) => actions.has(`${uid}.find`) || actions.has(`${uid}.findOne`)))
+  for (const uid of uids) {
+    if (!allowed.has(uid)) {
+      warnOnce(strapi, `[geo] ${uid} is skipped: the Public role can't read it. Allow find/findOne for Public, or set \`llms.publicOnly: false\`.`)
+    }
+  }
+  return allowed
+}
+
+async function sources(strapi: StrapiLike, llms: StrapiLlmsConfig) {
+  const allowed = await publicContentTypes(strapi, llms)
+  return Object.entries(llms.contentTypes).filter(([uid]) => allowed.has(uid))
+}
+
 async function findEntries(strapi: StrapiLike, uid: string, source: StrapiLlmsSource, extra?: Record<string, unknown>) {
   const filters = source.filters && extra ? { $and: [source.filters, extra] } : (extra ?? source.filters)
   return strapi.documents(uid).findMany({
@@ -61,7 +100,7 @@ function mapper(strapi: StrapiLike, llms: StrapiLlmsConfig, uid: string, source:
 
 export async function loadLlmsDocuments(strapi: StrapiLike, llms: StrapiLlmsConfig): Promise<LlmsDocument[]> {
   const docs: LlmsDocument[] = []
-  for (const [uid, source] of Object.entries(llms.contentTypes)) {
+  for (const [uid, source] of await sources(strapi, llms)) {
     const map = mapper(strapi, llms, uid, source)
     for (const entry of await findEntries(strapi, uid, source)) {
       const mapped = map(entry)
@@ -77,7 +116,7 @@ export async function loadLlmsDocuments(strapi: StrapiLike, llms: StrapiLlmsConf
  */
 export async function loadDocumentByPath(strapi: StrapiLike, llms: StrapiLlmsConfig, path: string): Promise<LlmsDocument | undefined> {
   const slug = lastSegment(path)
-  for (const [uid, source] of Object.entries(llms.contentTypes)) {
+  for (const [uid, source] of await sources(strapi, llms)) {
     const bySlug = !!strapi.contentType?.(uid)?.attributes?.slug
     if (bySlug && !slug) continue
     const map = mapper(strapi, llms, uid, source)

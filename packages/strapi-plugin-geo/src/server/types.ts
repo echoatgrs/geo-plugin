@@ -13,6 +13,7 @@ export interface StrapiLike {
     | undefined
   log: { warn(message: string): void; info(message: string): void }
   config?: { get<T = unknown>(key: string, defaultValue?: T): T }
+  db?: { query(uid: string): { findOne(params: Record<string, unknown>): Promise<Record<string, any> | null> } }
 }
 
 export interface KoaContextLike {

@@ -4,7 +4,11 @@ import type { KoaContextLike, StrapiLike } from './types'
 
 const ARTICLE = 'api::article.article'
 
-function fakeStrapi(config: Record<string, unknown>, data: Record<string, Record<string, any>[]> = {}) {
+function fakeStrapi(
+  config: Record<string, unknown>,
+  data: Record<string, Record<string, any>[]> = {},
+  publicActions: string[] | null = [`${ARTICLE}.find`, `${ARTICLE}.findOne`],
+) {
   const create = vi.fn(async () => ({}))
   const findMany = vi.fn(async (uid: string, params: Record<string, any>) =>
     (data[uid] ?? []).slice(params.start ?? 0, (params.start ?? 0) + (params.limit ?? 100)),
@@ -12,8 +16,14 @@ function fakeStrapi(config: Record<string, unknown>, data: Record<string, Record
   const strapi: StrapiLike = {
     plugin: () => ({ config: <T,>(key: string, fallback?: T) => (key in config ? config[key] : fallback) as T }),
     documents: (uid) => ({ create, findMany: (params = {}) => findMany(uid, params) }),
-    contentType: (uid) => (uid === ARTICLE ? { info: { pluralName: 'articles' } } : undefined),
+    contentType: (uid) =>
+      uid === ARTICLE ? { info: { pluralName: 'articles' } } : uid === 'plugin::users-permissions.role' && publicActions ? {} : undefined,
     log: { warn: vi.fn(), info: vi.fn() },
+    db: {
+      query: () => ({
+        findOne: async () => (publicActions ? { type: 'public', permissions: publicActions.map((action) => ({ action })) } : null),
+      }),
+    },
   }
   return { strapi, create, findMany }
 }
@@ -70,6 +80,31 @@ describe('strapi-plugin-geo', () => {
     const full = ctx(undefined)
     await controllers.llms({ strapi }).llmsFullTxt(full)
     expect(full.body).toContain('Hi there')
+  })
+
+  it('leaves out content types the Public role cannot read', async () => {
+    const { strapi, findMany } = fakeStrapi({ llms }, { [ARTICLE]: articles }, [])
+    const c = ctx(undefined)
+    await controllers.llms({ strapi }).llmsTxt(c)
+    expect(c.body).toBe('# Acme\n')
+    expect(findMany).not.toHaveBeenCalled()
+    expect(strapi.log.warn).toHaveBeenCalledWith(expect.stringContaining(`${ARTICLE} is skipped`))
+
+    const md = ctx(undefined, '', { path: '/articles/hello' })
+    await controllers.page({ strapi }).markdown(md)
+    expect(md.status).toBe(404)
+  })
+
+  it('lists nothing without Users & Permissions unless publicOnly is false', async () => {
+    const closed = fakeStrapi({ llms }, { [ARTICLE]: articles }, null)
+    const c = ctx(undefined)
+    await controllers.llms({ strapi: closed.strapi }).llmsTxt(c)
+    expect(c.body).toBe('# Acme\n')
+
+    const open = fakeStrapi({ llms: { ...llms, publicOnly: false } }, { [ARTICLE]: articles }, null)
+    const o = ctx(undefined)
+    await controllers.llms({ strapi: open.strapi }).llmsTxt(o)
+    expect(o.body).toContain('[Hello]')
   })
 
   it('returns 404 for llms.txt when not configured', async () => {

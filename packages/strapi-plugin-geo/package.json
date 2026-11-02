@@ -1,6 +1,6 @@
 {
   "name": "strapi-plugin-geo",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Headless GEO for Strapi 5: AI crawler logs, llms.txt and an AI visibility dashboard.",
   "license": "MIT",
   "repository": {

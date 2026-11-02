@@ -177,9 +177,16 @@ export const geoPlugin =
       }
     }
 
+    const onInit = config.onInit
     return {
       ...config,
       collections,
       endpoints: [...(config.endpoints ?? []), ...endpoints],
+      async onInit(payload) {
+        if (options.enabled !== false && !options.secret) {
+          payload.logger.warn('[geo] No secret configured: anyone can post crawler hits to the ingest endpoint. Set `secret` in geoPlugin().')
+        }
+        await onInit?.(payload)
+      },
     }
   }

@@ -23,6 +23,12 @@ export interface StrapiLlmsConfig {
   mediaURL?: string
   /** Link llms.txt entries to the `.md` version of each page. Turn on once the frontend serves them. Default false. */
   markdownLinks?: boolean
+  /**
+   * Only serve content types the Users & Permissions Public role can read (`find` or `findOne`), so
+   * llms.txt, Markdown and JSON-LD never expose what the REST API would refuse. Default true.
+   * Set false to serve every listed content type, e.g. when the site reads Strapi with an API token.
+   */
+  publicOnly?: boolean
 }
 
 export interface GeoStrapiConfig {
