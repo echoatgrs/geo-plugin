@@ -147,3 +147,74 @@ describe('markdown', () => {
     expect(jsonLdScriptProps({ a: '</script>' }).dangerouslySetInnerHTML.__html).toBe('{"a":"\\u003c/script>"}')
   })
 })
+
+describe('AI referrals', () => {
+  const CHROME = 'Mozilla/5.0 Chrome/130'
+  const nav = (url: string, headers: Record<string, string>) =>
+    new Request(url, { headers: { 'user-agent': CHROME, 'sec-fetch-dest': 'document', accept: 'text/html', ...headers } })
+
+  it('is off unless configured', async () => {
+    const { pending, event, fetch } = setup()
+    withGeo({ endpoint: '/api/geo/ingest', fetch: fetch as never })(nav('https://site.test/a', { referer: 'https://chatgpt.com/' }), event)
+    await Promise.all(pending)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('reports a page load from an AI assistant with only the referrer origin and landing path', async () => {
+    const { pending, event, fetch } = setup()
+    const proxy = withGeo({ endpoint: '/api/geo/ingest', secret: 'abc', fetch: fetch as never, referrals: { endpoint: '/api/geo/referrals' } })
+    proxy(nav('https://site.test/blog/a?utm_source=chatgpt.com&email=x', { referer: 'https://chatgpt.com/c/secret-conversation?q=1', 'x-forwarded-for': '9.9.9.9' }), event)
+    await Promise.all(pending)
+    expect(fetch).toHaveBeenCalledOnce()
+    const [url, init] = fetch.mock.calls[0]!
+    expect(String(url)).toBe('https://site.test/api/geo/referrals')
+    expect((init.headers as Record<string, string>)['x-geo-secret']).toBe('abc')
+    const body = JSON.parse(init.body as string)
+    expect(body).toMatchObject({ url: '/blog/a?utm_source=chatgpt.com', referrer: 'https://chatgpt.com', host: 'site.test', ip: '9.9.9.9' })
+    expect(init.body).not.toMatch(/secret-conversation|email/)
+  })
+
+  it('ignores unknown referrers, internal links, crawlers, prefetches and non-document requests', async () => {
+    const { pending, event, fetch } = setup()
+    const proxy = withGeo({ endpoint: '/api/geo/ingest', fetch: fetch as never, referrals: { endpoint: '/api/geo/referrals' } })
+    proxy(nav('https://site.test/a', { referer: 'https://www.google.com/' }), event)
+    proxy(nav('https://site.test/a', {}), event)
+    proxy(nav('https://site.test/a', { referer: 'https://site.test/b' }), event)
+    proxy(nav('https://site.test/a', { referer: 'https://chatgpt.com/', 'next-router-prefetch': '1' }), event)
+    proxy(nav('https://site.test/a', { referer: 'https://chatgpt.com/', 'sec-fetch-dest': 'image' }), event)
+    proxy(nav('https://site.test/a.md', { referer: 'https://chatgpt.com/' }), event)
+    proxy(nav('https://site.test/a', { referer: 'https://chatgpt.com.evil.test/' }), event)
+    await Promise.all(pending)
+    expect(fetch).not.toHaveBeenCalled()
+    // A crawler with an AI referer is a crawler hit, not a referral.
+    proxy(nav('https://site.test/a', { referer: 'https://chatgpt.com/', 'user-agent': GPTBOT }), event)
+    await Promise.all(pending)
+    expect(fetch.mock.calls.map(([u]) => new URL(String(u)).pathname)).toEqual(['/api/geo/ingest'])
+  })
+
+  it('reports unknown external referrals only when asked', async () => {
+    const { pending, event, fetch } = setup()
+    const proxy = withGeo({ endpoint: '/api/geo/ingest', fetch: fetch as never, referrals: { endpoint: '/api/geo/referrals', unknown: true } })
+    proxy(nav('https://site.test/a', { referer: 'https://www.google.com/search?q=x' }), event)
+    proxy(nav('https://site.test/a', {}), event)
+    await Promise.all(pending)
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(JSON.parse(fetch.mock.calls[0]![1].body as string).referrer).toBe('https://www.google.com')
+  })
+
+  it('respects the consent hook and never delays or breaks the page', async () => {
+    const { pending, event, fetch } = setup()
+    const consent = vi.fn(async (req: Request) => req.headers.get('cookie') === 'analytics=yes')
+    const proxy = withGeo({ endpoint: '/api/geo/ingest', fetch: fetch as never, referrals: { endpoint: '/api/geo/referrals', consent } }, () => 'page')
+    expect(proxy(nav('https://site.test/a', { referer: 'https://chatgpt.com/' }), event)).toBe('page')
+    await Promise.all(pending)
+    expect(fetch).not.toHaveBeenCalled()
+    proxy(nav('https://site.test/a', { referer: 'https://chatgpt.com/', cookie: 'analytics=yes' }), event)
+    await Promise.all(pending)
+    expect(fetch).toHaveBeenCalledOnce()
+    const failing = withGeo({ endpoint: '/x', onError: vi.fn(), fetch: fetch as never, referrals: { endpoint: '/r', consent: () => { throw new Error('boom') } } }, () => 'page')
+    expect(failing(nav('https://site.test/a', { referer: 'https://chatgpt.com/' }), event)).toBe('page')
+    await Promise.all(pending)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+})

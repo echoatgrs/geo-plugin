@@ -1,4 +1,5 @@
 import type { CheckThresholds, LlmsSourceConfig } from '@garus-ltd/geo-core'
+import type { StrapiCitationConfig, StrapiReferralConfig } from './evidence'
 
 export interface StrapiLlmsSource extends LlmsSourceConfig {
   /** Extra Document Service filters, e.g. `{ noindex: { $ne: true } }`. */
@@ -69,6 +70,10 @@ export interface GeoStrapiConfig {
     /** Seconds to wait for the frontend proxy's report of the test request. Default 4. */
     probeWaitSeconds?: number
   }
+  /** AI referral visits reported by withGeo({ referrals }). Off by default. */
+  referrals?: StrapiReferralConfig
+  /** Citation evidence entered by hand in the content manager. Off by default. */
+  citations?: StrapiCitationConfig
 }
 
 export default {

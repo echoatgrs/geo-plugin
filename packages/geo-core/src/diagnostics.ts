@@ -231,6 +231,8 @@ export interface SetupFacts {
   ingestEnabled: boolean
   secretConfigured: boolean
   verifyIPs: boolean
+  /** AI referral collection: undefined when the adapter doesn't support it. */
+  referralsEnabled?: boolean
   /** Newest stored hit, any verification. */
   latestHit: { timestamp: string; botName?: string; path: string; host?: string | null } | null
   lastIngestSuccess: string | null
@@ -285,6 +287,15 @@ export function configChecks(f: SetupFacts): DiagnosticItem[] {
       : { id: 'CFG-SECRET', status: 'warning', title: 'Ingest secret', detail: 'Not configured: anyone can post hits.', suggestion: 'Set the same secret in the CMS plugin and the frontend proxy.' },
   )
   items.push({ id: 'CFG-VERIFY', status: f.verifyIPs ? 'pass' : 'warning', title: 'IP verification', detail: f.verifyIPs ? 'On: hits are checked against published ranges.' : 'Off: every hit is unverifiable.' })
+  if (f.referralsEnabled !== undefined) {
+    items.push(
+      !f.referralsEnabled
+        ? { id: 'CFG-REFERRALS', status: 'notEnabled', title: 'AI referral visits', detail: 'Off (default). No visitor data is collected.', suggestion: 'Set `referrals: { enabled: true }` in the plugin and `referrals` in withGeo() to count visits from AI assistants.' }
+        : !f.secretConfigured
+          ? { id: 'CFG-REFERRALS', status: 'error', title: 'AI referral visits', detail: 'Enabled, but no secret is set, so reports are refused.', suggestion: 'Set GEO_SECRET in both the CMS and the frontend.' }
+          : { id: 'CFG-REFERRALS', status: 'pass', title: 'AI referral visits', detail: 'On: the frontend reports browser visits whose Referer is a known AI assistant (host and landing path only).' },
+    )
+  }
   return items
 }
 
@@ -343,6 +354,8 @@ export interface ActiveCheckOptions extends Omit<SafeFetchOptions, 'headers' | '
   /** How long to wait for the proxy's report of the probe request. Default 4000 ms. */
   probeWaitMs?: number
   ingestEnabled: boolean
+  /** AI referral collection is enabled in the CMS: also test that the proxy reports a visit from an AI referrer. */
+  referralsEnabled?: boolean
   /** Set when the frontend is a different deployment, to word unknown results. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -444,6 +457,41 @@ export async function runActiveChecks(options: ActiveCheckOptions): Promise<Diag
             ? { id: 'ACT-PROBE', status: 'notEnabled', title: 'Frontend proxy reports to the CMS', detail: 'Report arrived but ingest is disabled.' }
             : { id: 'ACT-PROBE', status: 'error', title: 'Frontend proxy reports to the CMS', detail: 'Report arrived with a wrong or missing secret.', suggestion: 'Use the same secret in the CMS plugin and withGeo().' },
     )
+  }
+
+  if (options.referralsEnabled && options.probes && sample) {
+    const title = 'Frontend proxy reports AI referral visits'
+    const refToken = options.probes.create()
+    const sent = await attempt('ACT-REFERRAL', title, async () => {
+      await safeFetch(sample.url, {
+        ...base,
+        headers: { 'user-agent': `Mozilla/5.0 (GeoDiagnostics) GeoProbe/${refToken}`, accept: 'text/html', referer: 'https://chatgpt.com/', 'sec-fetch-dest': 'document', 'sec-fetch-mode': 'navigate' },
+      })
+      return { id: 'ACT-REFERRAL', status: 'pass', title, detail: '' }
+    })
+    if (sent.status !== 'pass') items.push(sent)
+    else {
+      const sleep = options.sleep ?? wait
+      const deadline = Date.now() + (options.probeWaitMs ?? 4000)
+      let got = options.probes.result(refToken)
+      while (!got && Date.now() < deadline && !options.signal?.aborted) {
+        await sleep(250)
+        got = options.probes.result(refToken)
+      }
+      items.push(
+        !got
+          ? {
+              id: 'ACT-REFERRAL',
+              status: 'unknown',
+              title,
+              detail: 'Not verified yet: no report of the test visit (Referer chatgpt.com) arrived.',
+              suggestion: 'Pass `referrals: { endpoint }` to withGeo() and check that it points at this CMS. Reports can arrive late on some hosts: run the test again.',
+            }
+          : got.outcome === 'ok'
+            ? { id: 'ACT-REFERRAL', status: 'pass', title, detail: `Test visit reported at ${got.at}. It was recognised as a test and not stored or counted.` }
+            : { id: 'ACT-REFERRAL', status: 'error', title, detail: 'Report arrived with a wrong or missing secret.', suggestion: 'Use the same secret in the CMS plugin and withGeo().' },
+      )
+    }
   }
   return items
 }

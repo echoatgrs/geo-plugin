@@ -21,12 +21,16 @@ import {
 } from '@garus-ltd/geo-core'
 import { publicAccess, type PublicAccess } from './access'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
+import { AI_REFERRAL_UID, CITATION_UID, citationMiddleware, evidenceReport, ingestReferralReport } from './evidence'
 import { inspectStrapiEntry } from './inspect'
 import { documentStats, runSetupTest, setupReport, type SetupState } from './setup'
+import aiReferralSchema from './content-types/ai-referral/schema'
+import citationSchema from './content-types/citation/schema'
 import crawlerHitSchema from './content-types/crawler-hit/schema'
 import type { KoaContextLike, StrapiLike } from './types'
 
 export { checkFindRoute, publicAccess, type PublicAccess } from './access'
+export { AI_REFERRAL_UID, CITATION_UID } from './evidence'
 export const CRAWLER_HIT_UID = 'plugin::geo.crawler-hit'
 const PAGE_SIZE = 1000
 const MAX_STATS_HITS = 100_000
@@ -44,8 +48,12 @@ function getConfig(strapi: StrapiLike): GeoStrapiConfig {
     enabled: plugin.config('enabled', true),
     llms: plugin.config('llms', null),
     diagnostics: plugin.config('diagnostics', {}),
+    referrals: plugin.config('referrals', {}),
+    citations: plugin.config('citations', {}),
   }
 }
+
+
 
 type StrapiLlmsSource = StrapiLlmsConfig['contentTypes'][string]
 
@@ -263,6 +271,11 @@ export const controllers = {
     },
   }),
 
+  referrals: ({ strapi }: { strapi: StrapiLike }) => ({
+    ingest: (ctx: KoaContextLike) => ingestReferralReport(strapi, ctx, getConfig(strapi), setupState.probes),
+    evidence: (ctx: KoaContextLike) => evidenceReport(strapi, ctx, getConfig(strapi), ''),
+  }),
+
   setup: ({ strapi }: { strapi: StrapiLike }) => ({
     report: (ctx: KoaContextLike) => setupReport(strapi, getConfig(strapi), setupState, CRAWLER_HIT_UID, ctx),
     test: (ctx: KoaContextLike) => runSetupTest(strapi, getConfig(strapi), setupState, CRAWLER_HIT_UID, ctx),
@@ -296,6 +309,7 @@ export const routes = {
     type: 'content-api',
     routes: [
       publicRoute('POST', '/ingest', 'ingest.ingest'),
+      publicRoute('POST', '/referrals', 'referrals.ingest'),
       publicRoute('GET', '/llms.txt', 'llms.llmsTxt'),
       publicRoute('GET', '/llms-full.txt', 'llms.llmsFullTxt'),
       publicRoute('GET', '/markdown', 'page.markdown'),
@@ -311,19 +325,29 @@ export const routes = {
       { method: 'GET', path: '/setup', handler: 'setup.report', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'POST', path: '/setup/test', handler: 'setup.test', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'GET', path: '/document-stats', handler: 'setup.documentStats', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'GET', path: '/evidence', handler: 'referrals.evidence', config: { policies: ['admin::isAuthenticatedAdmin'] } },
     ],
   },
 }
 
 export default {
   config,
-  contentTypes: { 'crawler-hit': { schema: crawlerHitSchema } },
+  // Always registered, so Strapi creates the tables; nothing is written to them unless the feature is enabled.
+  contentTypes: {
+    'crawler-hit': { schema: crawlerHitSchema },
+    'ai-referral': { schema: aiReferralSchema },
+    citation: { schema: citationSchema },
+  },
   controllers,
   routes,
-  register() {},
+  register({ strapi }: { strapi: StrapiLike & { documents: { use?(mw: unknown): unknown } } }) {
+    ;(strapi.documents as { use?(mw: unknown): unknown }).use?.(citationMiddleware(strapi))
+  },
   bootstrap({ strapi }: { strapi: StrapiLike }) {
-    if (!getConfig(strapi).secret) {
+    const cfg = getConfig(strapi)
+    if (!cfg.secret) {
       strapi.log.warn('[geo] No secret configured: anyone can post crawler hits to /api/geo/ingest.')
+      if (cfg.referrals?.enabled) strapi.log.warn('[geo] `referrals` is enabled but no secret is configured, so referral reports are refused.')
     }
   },
 }

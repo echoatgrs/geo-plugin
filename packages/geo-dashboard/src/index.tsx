@@ -1,9 +1,11 @@
 import type { CrawlerStats } from '@garus-ltd/geo-core'
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { GeoEvidence, type GeoEvidenceProps } from './evidence.js'
 import { GeoSetupStatus, type GeoSetupStatusProps } from './setup.js'
 
 export type { CrawlerStats }
 export { GeoSetupStatus, type GeoSetupStatusProps, type SetupReport } from './setup.js'
+export { GeoEvidence, type EvidenceReport, type GeoEvidenceProps } from './evidence.js'
 export { DocumentTraffic, type DocumentStatsResult } from './document-traffic.js'
 export { GeoPanel, type GeoPanelProps, type PanelInspection, type PreviewVersion } from './panel.js'
 
@@ -19,6 +21,8 @@ export interface GeoDashboardProps {
   title?: string
   /** Adds a "Setup status" tab (full layout only). */
   setup?: GeoSetupStatusProps
+  /** Adds an "AI referrals & citations" tab (full layout only). */
+  evidence?: Pick<GeoEvidenceProps, 'load'>
 }
 
 // Colors work on light and dark admin themes: neutrals derive from the inherited text color.
@@ -117,9 +121,10 @@ export const proxy = withGeo({
 }
 
 export function GeoDashboard(props: GeoDashboardProps) {
-  const [view, setView] = useState<'overview' | 'setup'>('overview')
-  if (props.compact || !props.setup) return <Overview {...props} />
-  const tab = (id: 'overview' | 'setup', label: string) => (
+  type View = 'overview' | 'evidence' | 'setup'
+  const [view, setView] = useState<View>('overview')
+  if (props.compact || (!props.setup && !props.evidence)) return <Overview {...props} />
+  const tab = (id: View, label: string) => (
     <button
       type="button"
       role="tab"
@@ -132,11 +137,14 @@ export function GeoDashboard(props: GeoDashboardProps) {
   )
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <div role="tablist" aria-label="GEO" style={{ display: 'flex', gap: 4, borderBottom: '1px solid color-mix(in srgb, currentColor 12%, transparent)' }}>
+      <div role="tablist" aria-label="GEO" style={{ display: 'flex', gap: 4, flexWrap: 'wrap', borderBottom: '1px solid color-mix(in srgb, currentColor 12%, transparent)' }}>
         {tab('overview', 'Overview')}
-        {tab('setup', 'Setup status')}
+        {props.evidence && tab('evidence', 'AI referrals & citations')}
+        {props.setup && tab('setup', 'Setup status')}
       </div>
-      {view === 'overview' ? <Overview {...props} /> : <GeoSetupStatus {...props.setup} />}
+      {view === 'overview' && <Overview {...props} />}
+      {view === 'evidence' && props.evidence && <GeoEvidence load={props.evidence.load} fetchStats={props.fetchStats} />}
+      {view === 'setup' && props.setup && <GeoSetupStatus {...props.setup} />}
     </div>
   )
 }

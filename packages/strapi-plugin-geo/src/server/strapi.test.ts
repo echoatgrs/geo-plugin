@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { resetWarnings } from './access'
-import plugin, { CRAWLER_HIT_UID, controllers } from './index'
+import plugin, { AI_REFERRAL_UID, CITATION_UID, CRAWLER_HIT_UID, controllers } from './index'
+import { citationMiddleware } from './evidence'
 import type { KoaContextLike, StrapiLike } from './types'
 
 const ARTICLE = 'api::article.article'
@@ -134,11 +135,13 @@ describe('strapi-plugin-geo', () => {
   it('exposes public content-api routes and an admin-only stats route', () => {
     expect(plugin.routes['content-api'].routes.map((r) => `${r.method} ${r.path}`)).toEqual([
       'POST /ingest',
+      'POST /referrals',
       'GET /llms.txt',
       'GET /llms-full.txt',
       'GET /markdown',
       'GET /jsonld',
     ])
+    expect(plugin.routes.admin.routes.every((r) => r.config.policies.includes('admin::isAuthenticatedAdmin'))).toBe(true)
     expect(plugin.routes.admin.routes[0]).toMatchObject({ path: '/stats', config: { policies: ['admin::isAuthenticatedAdmin'] } })
   })
 
@@ -401,6 +404,79 @@ describe('strapi-plugin-geo', () => {
       const c = ctx(undefined)
       await controllers.editor({ strapi: t.strapi }).config(c)
       expect(c.body).toEqual({ contentTypes: [ARTICLE] })
+    })
+  })
+
+  describe('AI referrals and citation evidence', () => {
+    const visit = { url: '/articles/hello', referrer: 'https://www.perplexity.ai', host: 'site.test', ip: '3.3.3.3', userAgent: 'Mozilla/5.0' }
+
+    it('accepts nothing unless enabled, and needs the secret', async () => {
+      const off = fakeStrapi({ secret: 'abc' })
+      const c = ctx(visit, 'abc')
+      await controllers.referrals({ strapi: off.strapi }).ingest(c)
+      expect(c.status).toBe(503)
+      const on = fakeStrapi({ secret: 'abc', referrals: { enabled: true } })
+      const bad = ctx(visit, 'nope')
+      await controllers.referrals({ strapi: on.strapi }).ingest(bad)
+      expect(bad.status).toBe(401)
+      const ok = ctx(visit, 'abc')
+      await controllers.referrals({ strapi: on.strapi }).ingest(ok)
+      expect(ok.status).toBe(200)
+      expect(on.create).toHaveBeenCalledWith({ data: expect.objectContaining({ platform: 'Perplexity', referrerHost: 'www.perplexity.ai', path: '/articles/hello' }) })
+      const data = (on.create.mock.calls[0] as any)[0].data
+      expect(Object.keys(data).sort()).toEqual(['host', 'path', 'platform', 'referrerHost', 'source', 'timestamp'])
+      const noSecret = fakeStrapi({ referrals: { enabled: true } })
+      const c2 = ctx({ ...visit, ip: '4.4.4.4' })
+      await controllers.referrals({ strapi: noSecret.strapi }).ingest(c2)
+      expect(c2.status).toBe(503)
+    })
+
+    it('reports referrals and citation evidence separately, citations only to users who can read them', async () => {
+      const { strapi } = fakeStrapi(
+        { referrals: { enabled: true }, citations: { enabled: true } },
+        {
+          [AI_REFERRAL_UID]: [{ timestamp: new Date().toISOString(), platform: 'OpenAI', source: 'referrer', path: '/a' }],
+          [CITATION_UID]: [{ platform: 'Google_AI_Overviews', reviewStatus: 'verified' }],
+        },
+      )
+      const reader = ctx(undefined, '', { days: '7' })
+      reader.state = { userAbility: { can: () => true } }
+      await controllers.referrals({ strapi }).evidence(reader)
+      expect(reader.body).toMatchObject({
+        referrals: { total: 1 },
+        citations: { total: 1, byPlatform: [{ platform: 'Google AI Overviews', verified: 1 }], providers: [] },
+        newCitationHref: `/content-manager/collection-types/${CITATION_UID}/create`,
+      })
+      const other = ctx(undefined)
+      other.state = { userAbility: { can: () => false } }
+      await controllers.referrals({ strapi }).evidence(other)
+      expect(other.body).toMatchObject({ citations: null, referralsHref: undefined })
+    })
+
+    it('blocks duplicate citation evidence and keeps an edit history', async () => {
+      const findMany = vi.fn(async () => [] as any[])
+      const findOne = vi.fn(async () => ({ platform: 'ChatGPT', answerId: 'a1', citedURL: 'https://site.test/x', reviewStatus: 'pending', history: [{ at: 't0', by: 'Ann', action: 'create', fields: [] }] }))
+      const strapi: any = {
+        documents: () => ({ findMany, findOne }),
+        requestContext: { get: () => ({ state: { user: { id: 2, firstname: 'Bo', email: 'bo@x' } } }) },
+      }
+      const mw = citationMiddleware(strapi)
+      const next = vi.fn(async () => ({}))
+      const create: any = { uid: CITATION_UID, action: 'create', params: { data: { platform: 'ChatGPT', answerId: 'a1', citedURL: 'https://site.test/x', history: 'forged' } } }
+      await mw(create, next)
+      expect(create.params.data.dedupeKey).toBe('chatgpt|a1|site.test/x')
+      expect(create.params.data.history).toEqual([expect.objectContaining({ by: 'Bo', action: 'create' })])
+      findMany.mockResolvedValueOnce([{ id: 1 }])
+      await expect(mw({ uid: CITATION_UID, action: 'create', params: { data: { platform: 'ChatGPT', answerId: 'a1', citedURL: 'https://site.test/x' } } } as any, next)).rejects.toThrow(/Already recorded/)
+      const update: any = { uid: CITATION_UID, action: 'update', params: { documentId: 'd1', data: { reviewStatus: 'verified', platform: 'ChatGPT' } } }
+      await mw(update, next)
+      expect(update.params.data.history).toHaveLength(2)
+      expect(update.params.data.history[1]).toMatchObject({ by: 'Bo', action: 'update', fields: ['reviewStatus'] })
+      await expect(mw({ uid: CITATION_UID, action: 'create', params: { data: { platform: 'ChatGPT', citedURL: 'javascript:alert(1)' } } } as any, next)).rejects.toThrow(/http/)
+      // Other content types pass through untouched.
+      const other: any = { uid: 'api::article.article', action: 'create', params: { data: { title: 'x' } } }
+      await mw(other, next)
+      expect(other.params.data).toEqual({ title: 'x' })
     })
   })
 })

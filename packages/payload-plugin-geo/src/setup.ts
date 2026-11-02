@@ -29,6 +29,7 @@ export interface SetupContext {
   secretConfigured: boolean
   ingestEnabled: boolean
   verifyIPs: boolean
+  referralsEnabled: boolean
   probes: ProbeRegistry
   log: IngestLog
   diagnostics?: DiagnosticsOptions
@@ -70,6 +71,7 @@ async function facts(req: PayloadRequest, ctx: SetupContext): Promise<SetupFacts
     ingestEnabled: ctx.ingestEnabled,
     secretConfigured: ctx.secretConfigured,
     verifyIPs: ctx.verifyIPs,
+    referralsEnabled: ctx.referralsEnabled,
     latestHit: hit ? { timestamp: hit.timestamp, botName: hit.botName, path: hit.path, host: hit.host } : null,
     lastIngestSuccess: ctx.log.lastSuccess,
     recentIngestErrors: ctx.log.recentErrors(),
@@ -94,6 +96,7 @@ export async function runSetupTest(req: PayloadRequest, ctx: SetupContext): Prom
     sample: f.sample,
     probes: ctx.probes,
     ingestEnabled: ctx.ingestEnabled,
+    referralsEnabled: ctx.referralsEnabled && ctx.secretConfigured,
     allowPrivateNetwork: ctx.diagnostics?.allowPrivateNetwork === true,
     resolve: resolveHost,
     probeWaitMs: (ctx.diagnostics?.probeWaitSeconds ?? 4) * 1000,

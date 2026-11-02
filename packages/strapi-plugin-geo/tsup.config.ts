@@ -8,6 +8,8 @@ export default defineConfig([
     outExtension: () => ({ js: '.js' }),
     dts: true,
     sourcemap: true,
+    // Strapi's own copy, so its error classes are the ones Strapi's error handler recognises.
+    external: ['@strapi/utils'],
   },
   {
     // Bundled by the Strapi admin build (Vite or webpack) of the host app.

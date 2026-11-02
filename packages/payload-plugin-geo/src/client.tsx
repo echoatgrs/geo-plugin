@@ -3,6 +3,7 @@ import {
   GeoPanel,
   type CrawlerStats,
   type DocumentStatsResult,
+  type EvidenceReport,
   type PanelInspection,
   type PreviewVersion,
   type SetupReport,
@@ -16,6 +17,8 @@ export interface GeoDashboardClientProps {
   statsURL: string
   /** Setup status endpoint; adds the "Setup status" tab. */
   setupURL?: string
+  /** AI referrals & citation evidence endpoint; adds that tab. */
+  evidenceURL?: string
   compact?: boolean
   moreHref?: string
   hitsHref?: string
@@ -28,7 +31,7 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function GeoDashboardClient({ statsURL, setupURL, compact, moreHref, hitsHref }: GeoDashboardClientProps) {
+export function GeoDashboardClient({ statsURL, setupURL, evidenceURL, compact, moreHref, hitsHref }: GeoDashboardClientProps) {
   const fetchStats = useCallback(
     async (days: number): Promise<CrawlerStats> => {
       const res = await fetch(`${statsURL}?days=${days}`, { credentials: 'include' })
@@ -47,7 +50,11 @@ export function GeoDashboardClient({ statsURL, setupURL, compact, moreHref, hits
         : undefined,
     [setupURL],
   )
-  const dashboard = <GeoDashboard fetchStats={fetchStats} compact={compact} moreHref={moreHref} hitsHref={hitsHref} setup={setup} />
+  const evidence = useMemo(
+    () => (evidenceURL ? { load: (days: number, signal: AbortSignal) => json<EvidenceReport>(`${evidenceURL}?days=${days}`, { signal }) } : undefined),
+    [evidenceURL],
+  )
+  const dashboard = <GeoDashboard fetchStats={fetchStats} compact={compact} moreHref={moreHref} hitsHref={hitsHref} setup={setup} evidence={evidence} />
   // `beforeList` renders outside the list view's gutter, so add Payload's own gutter around the full dashboard.
   if (compact) return dashboard
   return <div style={{ padding: '0 var(--gutter-h, 60px)', marginBottom: 40 }}>{dashboard}</div>

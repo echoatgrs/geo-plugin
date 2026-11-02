@@ -1,4 +1,4 @@
-import { GeoDashboard, type CrawlerStats, type SetupReport } from '@garus-ltd/geo-dashboard'
+import { GeoDashboard, type CrawlerStats, type EvidenceReport, type SetupReport } from '@garus-ltd/geo-dashboard'
 import type { DiagnosticItem } from '@garus-ltd/geo-core'
 import { useFetchClient } from '@strapi/strapi/admin'
 import { useCallback, useMemo } from 'react'
@@ -21,6 +21,18 @@ export default function GeoPage() {
     }),
     [get, post],
   )
+  const evidence = useMemo(
+    () => ({
+      load: async (days: number) => {
+        const report = (await get<EvidenceReport>(`/geo/evidence?days=${days}`)).data
+        // The server sends admin-relative links; prefix the admin's base path.
+        const base = adminBase()
+        const abs = (href?: string) => (href ? `${base}${href}` : undefined)
+        return { ...report, referralsHref: abs(report.referralsHref), citationsHref: abs(report.citationsHref), newCitationHref: abs(report.newCitationHref) }
+      },
+    }),
+    [get],
+  )
   const fetchStats = useCallback(
     async (days: number) => (await get<CrawlerStats>(`/geo/stats?days=${days}`)).data,
     [get],
@@ -31,6 +43,7 @@ export default function GeoPage() {
         fetchStats={fetchStats}
         hitsHref={`${adminBase()}${HITS_PATH}`}
         setup={setup}
+        evidence={evidence}
       />
     </main>
   )

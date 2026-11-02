@@ -293,6 +293,74 @@ matching rows per request, narrowed in the database by path and date, and aggreg
 Already have middleware? Wrap it: `withGeo(options, yourMiddleware)`.
 `@garus-ltd/geo-next` only uses Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in a Cloudflare Worker.
 
+## AI referrals and citation evidence
+
+The dashboard's **AI referrals & citations** tab shows three signals side by side and never adds them up:
+
+| Signal | What it shows | What it doesn't |
+| --- | --- | --- |
+| AI crawler visits | An AI bot fetched a page (the existing log). | That the page was cited. |
+| AI referral visits | A person's browser arrived from an AI assistant (its `Referer`). | Every citation; the Referer can be forged, so it is never shown as verified. |
+| Recorded citation evidence | Someone saw a link to the site in an answer and recorded it by hand. | All citations anywhere. "Verified" means a person checked the record, not that the platform confirmed it. |
+
+There is no automatic citation monitoring. A `CitationMonitorProvider` interface is exported from `@garus-ltd/geo-core`
+for a future authorised API; with none configured the tab says "Automatic monitoring: not configured".
+
+### AI referral visits (off by default)
+
+```ts
+// CMS (Payload plugin options / Strapi config/plugins.ts `geo.config`)
+referrals: { enabled: true }   // needs `secret`
+
+// Frontend proxy
+export const middleware = withGeo({
+  endpoint: process.env.GEO_INGEST_URL!,
+  secret: process.env.GEO_SECRET,
+  referrals: {
+    endpoint: process.env.GEO_REFERRALS_URL!, // https://cms.example.com/api/geo/referrals ('/api/geo/referrals' for Payload in the same app)
+    consent: (req) => req.headers.get('cookie')?.includes('analytics=yes') ?? false, // your consent check (optional)
+  },
+  ignore: (path) => path.startsWith('/admin'), // e.g. Payload's admin in the same app
+})
+```
+
+The proxy reports a request only when it is a top-level page load (`Sec-Fetch-Dest: document`, not a prefetch, not
+an AI crawler) whose `Referer` host is a known assistant: chatgpt.com / chat.openai.com, perplexity.ai, claude.ai,
+gemini.google.com, copilot.microsoft.com, chat.deepseek.com, doubao.com, kimi.com / kimi.moonshot.cn, chat.mistral.ai,
+grok.com, meta.ai, you.com, poe.com, phind.com, alice.yandex.ru, giga.chat. Hosts match exactly or as a parent
+domain, never as a substring (`chatgpt.com.evil.test` and `?q=chatgpt` don't count). Without a Referer, only an exact
+`utm_source=<known host>` counts (ChatGPT adds `utm_source=chatgpt.com`). Pass `rules` (same shape as the exported
+`AI_REFERRERS`) on both sides to change the list. Everything else is unknown and not reported; with
+`referrals.unknown: true` in the proxy and `recordUnknown: true` in the CMS, external referrals that match no rule are
+stored as platform `unknown` (host only) and shown separately, never counted as AI visits.
+
+**Data kept**: timestamp, platform, `referrer` or `utm`, the referrer's host, the landing path (no query string) and
+the site host. The proxy sends only the referrer's origin and the path plus `utm_source`; the client IP and
+User-Agent are sent for an in-memory rate limit (20 per client and 600 in total per minute) and 30-minute duplicate
+filter, and are never stored. No conversation content, full referrer URLs or cross-site identifiers are kept.
+Reports need the shared secret (`GEO_SECRET` stays on the server; nothing runs in the browser), are rejected without
+one, and go to their own endpoint and table, separate from crawler hits. The connectivity test in **Setup status**
+sends a test visit with `Referer: chatgpt.com` and a one-time token, which is recognised and never stored.
+
+### Citation evidence (off by default)
+
+`citations: { enabled: true }` adds a **Citation Evidence** list for recording answers by hand: platform, question,
+observed time, cited URL, answer ID, answer link, screenshot, language, region, other conditions, recorded by, status
+(pending / verified / invalid) and notes. Records with the same platform + answer ID + cited URL are refused as
+duplicates; without an answer ID, telling duplicates apart is up to the reviewer. Only logged-in admins can read or
+change them, and no public endpoint serves them.
+
+- **Payload**: collection `geo-citations` with versions (edit history) and `recordedBy` set from the logged-in user;
+  screenshots go to a private upload collection `geo-citation-screenshots` (files are served only to logged-in users,
+  stored in `./geo-citation-screenshots`; `citations: { screenshots: false }` turns it off). Enabling `referrals` or
+  `citations` adds collections, so run a migration on Postgres / SQLite in production (`payload migrate:create`).
+- **Strapi**: content types `plugin::geo.ai-referral` and `plugin::geo.citation` are always registered (Strapi creates
+  the tables on start) but stay empty unless enabled. Strapi's media library serves files publicly, so evidence has a
+  `screenshotRef` text field (where you keep the screenshot) instead of an upload. Created by / updated by are kept by
+  Strapi, and the plugin appends each change (who, when, which fields) to a read-only `history` list. The review
+  status field is `reviewStatus`, because `status` is reserved in Strapi 5. Admin roles need Content Manager
+  permissions on these types to see them.
+
 ## IP verification
 
 Each hit is stored with `verification`:
@@ -318,7 +386,8 @@ npm run typecheck
 1. ~~AI crawler logs~~
 2. ~~`llms.txt`, `llms-full.txt`, Markdown version of each page (`/xxx.md`)~~
 3. ~~JSON-LD from config presets (Article, FAQ)~~, more presets (Product, HowTo, BreadcrumbList)
-4. ~~Admin dashboard~~, per-document sidebar in the editor
+4. ~~Admin dashboard~~, ~~per-document sidebar in the editor~~
+5. ~~AI referral visits and hand-recorded citation evidence~~; automatic citation monitoring through an authorised API
 
 ## License
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Config } from 'payload'
-import { CRAWLER_HITS_SLUG, geoPlugin } from './index.js'
+import { AI_REFERRALS_SLUG, CITATIONS_SLUG, CRAWLER_HITS_SLUG, geoPlugin } from './index.js'
 
 const posts = [
   { title: 'Hello', slug: 'hello', excerpt: 'First', content: { root: { children: [{ type: 'paragraph', children: [{ type: 'text', text: 'Body' }] }] } } },
@@ -42,6 +42,8 @@ describe('geoPlugin', () => {
       'get /geo/setup',
       'post /geo/setup/test',
       'get /geo/document-stats',
+      'post /geo/referrals',
+      'get /geo/evidence',
       'get /geo/llms.txt',
       'get /geo/llms-full.txt',
       'post /geo/inspect',
@@ -280,6 +282,79 @@ describe('geoPlugin', () => {
       expect(JSON.stringify(call.where)).toContain('/blog/hello.md')
       const other = await ep('/geo/document-stats')(fakeRequest({ user: { id: 1 }, url: 'http://cms.test/api/geo/document-stats?collection=users&id=1' }).req as never)
       expect(other.status).toBe(404)
+    })
+  })
+
+  describe('AI referrals and citation evidence', () => {
+    const plain = { collections: [{ slug: 'posts', fields: [] }] } as unknown as Config
+    const handler = (cfg: Config, path: string) => cfg.endpoints!.find((e) => e.path === path)!.handler
+    const visit = { url: '/blog/hello', referrer: 'https://chatgpt.com', host: 'site.test', ip: '1.1.1.1', userAgent: 'Mozilla/5.0' }
+
+    it('adds no collections and accepts nothing unless enabled', async () => {
+      const cfg = geoPlugin({ secret: 'abc', verifyIPs: false })(plain)
+      expect(cfg.collections!.map((c) => c.slug)).toEqual(['posts', CRAWLER_HITS_SLUG])
+      const { req, create } = fakeRequest({ body: visit, secret: 'abc' })
+      expect((await handler(cfg, '/geo/referrals')(req as never)).status).toBe(503)
+      expect(create).not.toHaveBeenCalled()
+      const res = await handler(cfg, '/geo/evidence')(fakeRequest({ user: { id: 1 } }).req as never)
+      expect(await res.json()).toMatchObject({ referrals: null, citations: null })
+    })
+
+    it('stores an AI referral with host and path only, and requires the secret', async () => {
+      const cfg = geoPlugin({ secret: 'abc', verifyIPs: false, referrals: { enabled: true } })(plain)
+      expect(cfg.collections!.map((c) => c.slug)).toContain(AI_REFERRALS_SLUG)
+      const bad = fakeRequest({ body: visit, secret: 'nope' })
+      expect((await handler(cfg, '/geo/referrals')(bad.req as never)).status).toBe(401)
+      const ok = fakeRequest({ body: visit, secret: 'abc' })
+      const res = await handler(cfg, '/geo/referrals')(ok.req as never)
+      expect(await res.json()).toMatchObject({ stored: 1 })
+      const saved = (ok.create.mock.calls[0] as any)[0]
+      expect(saved.collection).toBe(AI_REFERRALS_SLUG)
+      expect(Object.keys(saved.data).sort()).toEqual(['host', 'path', 'platform', 'referrerHost', 'source', 'timestamp'])
+      // The same visit again within 30 minutes is a duplicate.
+      const again = fakeRequest({ body: visit, secret: 'abc' })
+      expect(await (await handler(cfg, '/geo/referrals')(again.req as never)).json()).toMatchObject({ stored: 0, duplicates: 1 })
+    })
+
+    it('refuses referral reports when no secret is configured', async () => {
+      const cfg = geoPlugin({ verifyIPs: false, referrals: { enabled: true } })(plain)
+      expect((await handler(cfg, '/geo/referrals')(fakeRequest({ body: visit }).req as never)).status).toBe(503)
+    })
+
+    it('adds a private, versioned citation evidence collection with duplicate protection', async () => {
+      const cfg = geoPlugin({ verifyIPs: false, citations: { enabled: true } })(plain)
+      const citations = cfg.collections!.find((c) => c.slug === CITATIONS_SLUG)!
+      expect(citations.versions).toBeTruthy()
+      const shots = cfg.collections!.find((c) => c.slug === 'geo-citation-screenshots')!
+      expect(await (shots.access!.read as any)({ req: {} })).toBe(false)
+      expect(await (citations.access!.read as any)({ req: {} })).toBe(false)
+      const hook = citations.hooks!.beforeChange![0]!
+      const req = { user: { id: 9 }, payload: { find: vi.fn(async () => ({ docs: [] })) } }
+      const data: any = { platform: 'ChatGPT', answerId: 'share-1', citedURL: 'https://site.test/blog/hello/' }
+      await (hook as any)({ data, req, operation: 'create' })
+      expect(data).toMatchObject({ recordedBy: 9, dedupeKey: 'chatgpt|share-1|site.test/blog/hello' })
+      req.payload.find = vi.fn(async () => ({ docs: [{ id: 1 }] }))
+      await expect((hook as any)({ data: { ...data }, req, operation: 'create' })).rejects.toThrow()
+      // Without an answer id there is no key: duplicates are left to the reviewer.
+      const loose: any = { platform: 'ChatGPT', citedURL: 'https://site.test/a' }
+      await (hook as any)({ data: loose, req, operation: 'create' })
+      expect(loose.dedupeKey).toBeNull()
+    })
+
+    it('reports the three signals separately, admin only', async () => {
+      const cfg = geoPlugin({ secret: 'abc', verifyIPs: false, referrals: { enabled: true }, citations: { enabled: true } })(plain)
+      expect((await handler(cfg, '/geo/evidence')(fakeRequest({}).req as never)).status).toBe(401)
+      const { req } = fakeRequest({ user: { id: 1 }, url: 'http://cms.test/api/geo/evidence?days=7' })
+      ;(req.payload as any).find = vi.fn(async ({ collection }: { collection: string }) => ({
+        docs:
+          collection === AI_REFERRALS_SLUG
+            ? [{ timestamp: new Date().toISOString(), platform: 'OpenAI', source: 'referrer', path: '/blog/hello' }]
+            : [{ platform: 'ChatGPT', status: 'verified' }, { platform: 'ChatGPT', status: 'pending' }],
+      }))
+      const body = await (await handler(cfg, '/geo/evidence')(req as never)).json()
+      expect(body.referrals).toMatchObject({ total: 1, byPlatform: [{ platform: 'OpenAI', total: 1 }] })
+      expect(body.citations).toMatchObject({ total: 2, byStatus: { verified: 1, pending: 1, invalid: 0 }, providers: [] })
+      expect(body.newCitationHref).toBe('/admin/collections/geo-citations/create')
     })
   })
 })

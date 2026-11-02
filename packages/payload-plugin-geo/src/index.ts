@@ -13,6 +13,16 @@ import {
 } from '@garus-ltd/geo-core'
 import type { CollectionConfig, Config, Endpoint, Plugin } from 'payload'
 import { CRAWLER_HITS_SLUG, crawlerHitsCollection } from './collection.js'
+import {
+  AI_REFERRALS_SLUG,
+  CITATIONS_SLUG,
+  citationScreenshotsCollection,
+  citationsCollection,
+  evidenceEndpoints,
+  referralsCollection,
+  type CitationOptions,
+  type ReferralOptions,
+} from './evidence.js'
 import { inspectPayloadDocument } from './inspect.js'
 import { documentStats, runSetupTest, setupReport, type DiagnosticsOptions, type SetupContext } from './setup.js'
 import {
@@ -49,8 +59,19 @@ export interface GeoPluginOptions {
   editorPanel?: boolean
   /** Setup status view: connectivity test limits. */
   diagnostics?: DiagnosticsOptions
+  /**
+   * AI referral visits: browser visits from an AI assistant, reported by withGeo({ referrals }). Off by default;
+   * enabling it adds the `geo-ai-referrals` collection (a migration on SQL databases).
+   */
+  referrals?: ReferralOptions
+  /**
+   * Citation evidence entered by hand. Off by default; enabling it adds the `geo-citations` collection
+   * (and `geo-citation-screenshots` unless `screenshots: false`), which needs a migration on SQL databases.
+   */
+  citations?: CitationOptions
 }
 
+export { AI_REFERRALS_SLUG, CITATIONS_SLUG, type CitationOptions, type ReferralOptions }
 export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsDocuments, type LlmsOptions, type PayloadLlmsSource }
 
 const MAX_STATS_HITS = 100_000
@@ -114,6 +135,14 @@ export const geoPlugin =
       ),
       collection,
     ]
+    const referralsOn = options.referrals?.enabled === true
+    const citationsOn = options.citations?.enabled === true
+    if (referralsOn) collections.push(referralsCollection(options.referrals?.collection))
+    if (citationsOn) {
+      const screenshots = options.citations?.screenshots !== false
+      if (screenshots) collections.push(citationScreenshotsCollection())
+      collections.push(citationsCollection({ usersSlug: config.admin?.user ?? 'users', screenshots, overrides: options.citations?.collection }))
+    }
 
     const ingestEndpoint: Endpoint = {
       path: options.ingestPath ?? '/geo/ingest',
@@ -179,6 +208,7 @@ export const geoPlugin =
       secretConfigured: !!options.secret,
       ingestEnabled: options.enabled !== false,
       verifyIPs: !!verifyIPs,
+      referralsEnabled: referralsOn,
       probes,
       log: ingestLog,
       diagnostics: options.diagnostics,
@@ -190,6 +220,7 @@ export const geoPlugin =
       { path: '/geo/setup', method: 'get', handler: (req) => setupReport(req, setupContext) },
       { path: '/geo/setup/test', method: 'post', handler: (req) => runSetupTest(req, setupContext) },
       { path: '/geo/document-stats', method: 'get', handler: (req) => documentStats(req, setupContext) },
+      ...evidenceEndpoints({ referrals: options.referrals, citations: options.citations, secret: options.secret, probes, adminRoute: config.routes?.admin ?? '/admin' }),
     ]
     if (options.llms) {
       const llms = options.llms
@@ -250,7 +281,14 @@ export const geoPlugin =
       const hitsHref = `${config.routes?.admin ?? '/admin'}/collections/${collection.slug}`
       const component = (compact: boolean) => ({
         path: 'payload-plugin-geo/client#GeoDashboardClient',
-        clientProps: { statsURL: `${statsBase}/geo/stats`, setupURL: compact ? undefined : `${statsBase}/geo/setup`, compact, moreHref: hitsHref, hitsHref },
+        clientProps: {
+          statsURL: `${statsBase}/geo/stats`,
+          setupURL: compact ? undefined : `${statsBase}/geo/setup`,
+          evidenceURL: compact ? undefined : `${statsBase}/geo/evidence`,
+          compact,
+          moreHref: hitsHref,
+          hitsHref,
+        },
       })
       collection.admin = {
         ...collection.admin,
@@ -279,6 +317,9 @@ export const geoPlugin =
       async onInit(payload) {
         if (options.enabled !== false && !options.secret) {
           payload.logger.warn('[geo] No secret configured: anyone can post crawler hits to the ingest endpoint. Set `secret` in geoPlugin().')
+        }
+        if (referralsOn && !options.secret) {
+          payload.logger.warn('[geo] `referrals` is enabled but no secret is configured, so referral reports are refused. Set `secret` in geoPlugin().')
         }
         await onInit?.(payload)
       },
