@@ -1,4 +1,4 @@
-import { GeoPanel, type PanelInspection, type PreviewVersion } from '@garus-ltd/geo-dashboard'
+import { GeoPanel, type DocumentStatsResult, type PanelInspection, type PreviewVersion } from '@garus-ltd/geo-dashboard'
 import { unstable_useContentManagerContext as useContentManagerContext, useFetchClient } from '@strapi/strapi/admin'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -31,7 +31,7 @@ function useConfiguredTypes(): string[] | null {
 }
 
 function PanelContent({ model, documentId }: PanelProps) {
-  const { post } = useFetchClient()
+  const { get, post } = useFetchClient()
   const { form } = useContentManagerContext() as { form: { values?: unknown } }
   const values = form?.values ?? {}
   const inspect = useCallback(
@@ -39,7 +39,12 @@ function PanelContent({ model, documentId }: PanelProps) {
       (await post<PanelInspection>('/geo/inspect', { model, documentId, data, version }, { signal })).data,
     [post, model, documentId],
   )
-  return <GeoPanel documentKey={`${model}:${documentId ?? 'new'}`} values={values} inspect={inspect} bare />
+  const fetchDocumentStats = useCallback(
+    async (days: number, signal: AbortSignal) =>
+      (await get<DocumentStatsResult>(`/geo/document-stats?model=${encodeURIComponent(model)}${documentId ? `&documentId=${encodeURIComponent(documentId)}` : ''}&days=${days}`, { signal })).data,
+    [get, model, documentId],
+  )
+  return <GeoPanel documentKey={`${model}:${documentId ?? 'new'}`} values={values} inspect={inspect} fetchDocumentStats={fetchDocumentStats} bare />
 }
 
 /** Content manager side panel. Returns nothing for content types that are not in `llms.contentTypes`. */

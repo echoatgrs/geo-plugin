@@ -1,6 +1,9 @@
 import {
   GEO_SECRET_HEADER,
+  IngestLog,
+  ProbeRegistry,
   createIPVerifier,
+  findProbeInBody,
   ingestHits,
   summarizeHits,
   windowStart,
@@ -11,6 +14,7 @@ import {
 import type { CollectionConfig, Config, Endpoint, Plugin } from 'payload'
 import { CRAWLER_HITS_SLUG, crawlerHitsCollection } from './collection.js'
 import { inspectPayloadDocument } from './inspect.js'
+import { documentStats, runSetupTest, setupReport, type DiagnosticsOptions, type SetupContext } from './setup.js'
 import {
   loadDocumentByPath,
   loadLlmsDocuments,
@@ -43,6 +47,8 @@ export interface GeoPluginOptions {
    * It stores nothing and never changes the document.
    */
   editorPanel?: boolean
+  /** Setup status view: connectivity test limits. */
+  diagnostics?: DiagnosticsOptions
 }
 
 export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsDocuments, type LlmsOptions, type PayloadLlmsSource }
@@ -73,6 +79,8 @@ export const geoPlugin =
   (config: Config): Config => {
     const verifyIPs = options.verifyIPs ?? true
     const verifier = verifyIPs ? createIPVerifier(verifyIPs === true ? {} : verifyIPs) : undefined
+    const probes = new ProbeRegistry()
+    const ingestLog = new IngestLog()
     const collection = crawlerHitsCollection(options.collection)
     const apiRoute = config.routes?.api ?? '/api'
     const editorPanel = options.llms && options.editorPanel !== false
@@ -91,7 +99,11 @@ export const geoPlugin =
                     components: {
                       Field: {
                         path: 'payload-plugin-geo/client#GeoEditPanel',
-                        clientProps: { inspectURL: `${config.serverURL ?? ''}${apiRoute}/geo/inspect`, collection: c.slug },
+                        clientProps: {
+                          inspectURL: `${config.serverURL ?? ''}${apiRoute}/geo/inspect`,
+                          statsURL: `${config.serverURL ?? ''}${apiRoute}/geo/document-stats`,
+                          collection: c.slug,
+                        },
                       },
                     },
                   },
@@ -107,12 +119,18 @@ export const geoPlugin =
       path: options.ingestPath ?? '/geo/ingest',
       method: 'post',
       handler: async (req) => {
-        if (options.enabled === false) return Response.json({ ok: false, error: 'disabled' }, { status: 503 })
         let body: unknown
         try {
           body = await req.json?.()
         } catch {
+          if (options.enabled === false) return Response.json({ ok: false, error: 'disabled' }, { status: 503 })
+          ingestLog.record({ at: new Date().toISOString(), status: 400, error: 'invalid json' })
           return Response.json({ ok: false, error: 'invalid json' }, { status: 400 })
+        }
+        if (options.enabled === false) {
+          const probe = findProbeInBody(body, probes)
+          if (probe) probes.record(probe.token, 'disabled', probe)
+          return Response.json({ ok: false, error: 'disabled' }, { status: 503 })
         }
         const store: HitStore = {
           async save(hit) {
@@ -124,6 +142,8 @@ export const geoPlugin =
           verifier,
           storeSpoofed: options.storeSpoofed,
           store,
+          probes,
+          log: ingestLog,
         })
         return Response.json(result.body, { status: result.status })
       },
@@ -151,7 +171,26 @@ export const geoPlugin =
       },
     }
 
-    const endpoints: Endpoint[] = [ingestEndpoint, statsEndpoint]
+    const setupContext: SetupContext = {
+      llms: options.llms,
+      collections,
+      hitsSlug: collection.slug,
+      serverURL: config.serverURL,
+      secretConfigured: !!options.secret,
+      ingestEnabled: options.enabled !== false,
+      verifyIPs: !!verifyIPs,
+      probes,
+      log: ingestLog,
+      diagnostics: options.diagnostics,
+    }
+    const endpoints: Endpoint[] = [
+      ingestEndpoint,
+      statsEndpoint,
+      // Admin only: setup status, the explicit connectivity test, and per-document visits.
+      { path: '/geo/setup', method: 'get', handler: (req) => setupReport(req, setupContext) },
+      { path: '/geo/setup/test', method: 'post', handler: (req) => runSetupTest(req, setupContext) },
+      { path: '/geo/document-stats', method: 'get', handler: (req) => documentStats(req, setupContext) },
+    ]
     if (options.llms) {
       const llms = options.llms
       for (const full of [false, true]) {
@@ -211,7 +250,7 @@ export const geoPlugin =
       const hitsHref = `${config.routes?.admin ?? '/admin'}/collections/${collection.slug}`
       const component = (compact: boolean) => ({
         path: 'payload-plugin-geo/client#GeoDashboardClient',
-        clientProps: { statsURL: `${statsBase}/geo/stats`, compact, moreHref: hitsHref, hitsHref },
+        clientProps: { statsURL: `${statsBase}/geo/stats`, setupURL: compact ? undefined : `${statsBase}/geo/setup`, compact, moreHref: hitsHref, hitsHref },
       })
       collection.admin = {
         ...collection.admin,

@@ -1,5 +1,6 @@
 import { AI_BOTS, detectBot, type BotDefinition, type BotPurpose } from './bots.js'
 import type { IPVerifier, Verification } from './verify.js'
+import { findProbeInBody, type IngestLog, type ProbeRegistry } from './diagnostics.js'
 
 /** Header the frontend SDK uses to authenticate with the CMS ingest endpoint. */
 export const GEO_SECRET_HEADER = 'x-geo-secret'
@@ -47,6 +48,10 @@ export interface IngestOptions {
   /** Store hits whose IP is outside the vendor's ranges. Default true, so spoofing shows up in the dashboard. */
   storeSpoofed?: boolean
   bots?: readonly BotDefinition[]
+  /** Diagnostic probe tokens: matching hits are recorded as test evidence and never stored. */
+  probes?: ProbeRegistry
+  /** Records the outcome of each ingest call for the setup status view. */
+  log?: IngestLog
 }
 
 export interface IngestResult {
@@ -88,15 +93,28 @@ export async function ingestHits(
   providedSecret: string | null | undefined,
   options: IngestOptions,
 ): Promise<IngestResult> {
+  const done = (result: IngestResult): IngestResult => {
+    options.log?.record({ at: new Date().toISOString(), status: result.status, error: result.body.error, stored: result.body.stored })
+    return result
+  }
   if (options.secret && !(providedSecret && safeEqual(providedSecret, options.secret))) {
-    return { status: 401, body: { ok: false, error: 'invalid secret' } }
+    const probe = options.probes && findProbeInBody(body, options.probes)
+    if (probe) options.probes!.record(probe.token, 'invalid-secret', probe)
+    return done({ status: 401, body: { ok: false, error: 'invalid secret' } })
   }
   const inputs = asHitInputs(body)
-  if (!inputs) return { status: 400, body: { ok: false, error: 'invalid payload' } }
+  if (!inputs) return done({ status: 400, body: { ok: false, error: 'invalid payload' } })
 
   let stored = 0
   let skipped = 0
   for (const input of inputs) {
+    const probe = options.probes?.match(input.userAgent)
+    if (probe) {
+      // Diagnostic test request: evidence only, never counted as traffic.
+      options.probes!.record(probe, 'ok', { path: input.path, host: input.host ?? null })
+      skipped++
+      continue
+    }
     const bot = detectBot(input.userAgent, options.bots ?? AI_BOTS)
     if (!bot) {
       skipped++
@@ -127,5 +145,5 @@ export async function ingestHits(
     })
     stored++
   }
-  return { status: 200, body: { ok: true, stored, skipped } }
+  return done({ status: 200, body: { ok: true, stored, skipped } })
 }

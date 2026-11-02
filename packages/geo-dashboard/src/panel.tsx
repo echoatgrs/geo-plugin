@@ -1,5 +1,6 @@
 import type { CheckResult, CheckStatus, FieldDiagnostic, Inspection } from '@garus-ltd/geo-core'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { DocumentTraffic, type DocumentStatsResult } from './document-traffic.js'
 
 /** What the CMS's authenticated inspect endpoint returns. */
 export interface PanelInspection extends Inspection {
@@ -24,6 +25,8 @@ export interface GeoPanelProps {
   collapsed?: boolean
   /** No border or padding of its own, for hosts that already frame the panel (Strapi side panels). */
   bare?: boolean
+  /** AI crawler visits to this document's page. Adds a "Visits" tab. */
+  fetchDocumentStats?: (days: number, signal: AbortSignal) => Promise<DocumentStatsResult>
 }
 
 const STATUS: Record<CheckStatus, { label: string; icon: string; color: string }> = {
@@ -150,8 +153,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
 export type PreviewVersion = 'current' | 'published'
 
-const TABS = ['Checks', 'Markdown', 'JSON-LD', 'Fields'] as const
-type Tab = (typeof TABS)[number]
+const ALL_TABS = ['Checks', 'Markdown', 'JSON-LD', 'Fields', 'Visits'] as const
+type Tab = (typeof ALL_TABS)[number]
 
 function summary(checks: CheckResult[]) {
   const n = (s: CheckStatus) => checks.filter((c) => c.status === s).length
@@ -162,7 +165,8 @@ function summary(checks: CheckResult[]) {
  * Read-only GEO panel for the document editor. It never writes to the form: it reads the current values,
  * asks the CMS (debounced) for checks and previews, and shows them.
  */
-export function GeoPanel({ documentKey, values, inspect, debounceMs = 800, collapsed = false, bare = false }: GeoPanelProps) {
+export function GeoPanel({ documentKey, values, inspect, debounceMs = 800, collapsed = false, bare = false, fetchDocumentStats }: GeoPanelProps) {
+  const TABS = ALL_TABS.filter((t) => t !== 'Visits' || !!fetchDocumentStats)
   const [open, setOpen] = useState(!collapsed)
   const [tab, setTab] = useState<Tab>('Checks')
   const [version, setVersion] = useState<PreviewVersion>('current')
@@ -279,8 +283,13 @@ export function GeoPanel({ documentKey, values, inspect, debounceMs = 800, colla
             ))}
           </div>
           {error && <div role="alert" style={{ color: STATUS.error.color }}>Could not run the GEO check: {error}</div>}
-          {!result && !error && <div style={muted}>Checking…</div>}
-          {result && (
+          {tab === 'Visits' && fetchDocumentStats && (
+            <div role="tabpanel" aria-label="Visits">
+              <DocumentTraffic documentKey={documentKey} fetchStats={fetchDocumentStats} />
+            </div>
+          )}
+          {tab !== 'Visits' && !result && !error && <div style={muted}>Checking…</div>}
+          {tab !== 'Visits' && result && (
             <div role="tabpanel" aria-label={tab} style={{ display: 'grid', gap: 8, opacity: loading ? 0.6 : 1 }}>
               {tab === 'Checks' && <CheckList checks={result.checks} />}
               {tab === 'Markdown' && (

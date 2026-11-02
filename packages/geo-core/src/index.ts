@@ -60,3 +60,31 @@ export {
   type InspectOptions,
   type Inspection,
 } from './checks.js'
+export {
+  documentPathVariants,
+  hitDocumentPath,
+  summarizeDocumentHits,
+  type DocumentHit,
+  type DocumentStats,
+  type DocumentStatsOptions,
+} from './document-stats.js'
+export {
+  BlockedURLError,
+  IngestLog,
+  ProbeRegistry,
+  configChecks,
+  evidenceChecks,
+  findProbeInBody,
+  isPrivateAddress,
+  manualSteps,
+  probeUserAgent,
+  runActiveChecks,
+  safeFetch,
+  type ActiveCheckOptions,
+  type DiagnosticItem,
+  type DiagnosticStatus,
+  type IngestEvent,
+  type SafeFetchOptions,
+  type SafeResponse,
+  type SetupFacts,
+} from './diagnostics.js'

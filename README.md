@@ -258,6 +258,38 @@ Options: `editorPanel: false` turns the panel off (Payload: plugin option; Strap
 upgrading so it finds the `GeoEditPanel` component. In Payload, field-level read access is not applied to the
 "current edits" preview (collection access is).
 
+## Setup status
+
+The full dashboard (Payload: above **GEO > AI Crawler Hits**; Strapi: **AI Visibility**) has a **Setup status** tab
+that keeps three kinds of evidence apart:
+
+- **Configuration**: `siteURL`, each mapped collection and how many public documents it has, a sample public
+  document, whether ingest is enabled, whether a secret is set (never its value), IP verification.
+- **Connectivity test**, only when you press *Run test*: the CMS requests the sample article page, its `.md`
+  version, the page with `Accept: text/markdown`, `/llms.txt`, and checks for a JSON-LD tag, each answered as
+  OK / Not enabled / Problem / Not verified. The article request carries a one-time token in its User-Agent; when the
+  frontend proxy reports it, the CMS recognises the token (only tokens it issued in the last 10 minutes count),
+  records "report received with a valid secret" (or "wrong secret", or "ingest disabled") and does **not** store the
+  hit, so test traffic never reaches visit counts or coverage. Requests go only to the `siteURL` origin, with a 5 s
+  timeout, at most 3 redirects (each re-checked), a 256 KB body cap, and no private or loopback addresses. For local
+  development set `diagnostics: { allowPrivateNetwork: true }` (Payload plugin option; Strapi plugin config).
+- **Recent evidence**: the newest stored hit, the last accepted report and recent rejected reports (status and
+  reason only) since the CMS started. A site with no AI visits yet shows "No data received yet", not an error.
+
+When the frontend is a separate deployment the CMS can't see its environment, so anything without evidence shows
+**Not verified**, and the tab lists `curl` commands to check by hand.
+
+## Per-page visits
+
+The editor panel's **Visits** tab shows AI crawler visits to that document's page over 7 / 30 / 90 days: valid
+visits (everything but `spoofed`), live user fetches, `.md` reads (counted with the page), a daily chart, platforms,
+purposes, IP-check counts and the latest records with their raw request path. The page path comes from the document
+through the same URL mapping as llms.txt (published version first), never from its title; query strings, `#` and
+trailing slashes are ignored, and hits for another host are left out (add aliases with `llms.hosts:
+['www.example.com']`). After a URL change only the new URL is counted. Days are UTC. The CMS loads at most 20,000
+matching rows per request, narrowed in the database by path and date, and aggregates them on the server.
+"No visits" only means no crawler request reached the site; it says nothing about whether an assistant cites the page.
+
 Already have middleware? Wrap it: `withGeo(options, yourMiddleware)`.
 `@garus-ltd/geo-next` only uses Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in a Cloudflare Worker.
 

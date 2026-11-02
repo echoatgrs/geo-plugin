@@ -39,6 +39,9 @@ describe('geoPlugin', () => {
     expect(config.endpoints?.map((e) => `${e.method} ${e.path}`)).toEqual([
       'post /geo/ingest',
       'get /geo/stats',
+      'get /geo/setup',
+      'post /geo/setup/test',
+      'get /geo/document-stats',
       'get /geo/llms.txt',
       'get /geo/llms-full.txt',
       'post /geo/inspect',
@@ -232,6 +235,51 @@ describe('geoPlugin', () => {
       expect(body.checks.find((c: any) => c.ruleId === 'GEO-STATUS').status).toBe('notApplicable')
       expect(body.checks.find((c: any) => c.ruleId === 'GEO-URL').status).toBe('warning')
       expect(body.document.url).toBe('https://site.test/blog/undefined')
+    })
+  })
+
+  describe('setup status and document visits', () => {
+    const setupConfig = geoPlugin({
+      secret: 'abc',
+      verifyIPs: false,
+      llms: { siteURL: 'https://site.test', collections: { posts: { url: (d) => `/blog/${d.slug}` } } },
+    })({ collections: [{ slug: 'posts', fields: [{ name: 'slug', type: 'text' }] }] } as unknown as Config)
+    const ep = (path: string) => setupConfig.endpoints!.find((e) => e.path === path)!.handler
+
+    it('is admin only and never shows the secret', async () => {
+      expect((await ep('/geo/setup')(fakeRequest({}).req as never)).status).toBe(401)
+      expect((await ep('/geo/setup/test')(fakeRequest({}).req as never)).status).toBe(401)
+      expect((await ep('/geo/document-stats')(fakeRequest({}).req as never)).status).toBe(401)
+      const res = await ep('/geo/setup')(fakeRequest({ user: { id: 1 } }).req as never)
+      const text = await res.text()
+      expect(res.headers.get('cache-control')).toBe('private, no-store')
+      expect(text).not.toContain('abc')
+      const body = JSON.parse(text)
+      expect(body.config.find((i: any) => i.id === 'CFG-SECRET').status).toBe('pass')
+      expect(body.evidence.find((i: any) => i.id === 'EV-LATEST').status).toBe('pass')
+      expect(body.manual[0]).toContain('https://site.test/blog/hello')
+    })
+
+    it('blocks the connectivity test against a private address by default', async () => {
+      const local = geoPlugin({ verifyIPs: false, llms: { siteURL: 'http://127.0.0.1:3999', collections: { posts: { url: (d) => `/blog/${d.slug}` } } } })(
+        { collections: [{ slug: 'posts', fields: [] }] } as unknown as Config,
+      )
+      const res = await local.endpoints!.find((e) => e.path === '/geo/setup/test')!.handler(fakeRequest({ user: { id: 1 } }).req as never)
+      const body = await res.json()
+      expect(body.active.find((i: any) => i.id === 'ACT-HTML')).toMatchObject({ status: 'error', detail: expect.stringContaining('private') })
+    })
+
+    it('computes visits for the document path, with the hits query narrowed and capped', async () => {
+      const { req, find } = fakeRequest({ user: { id: 1 }, url: 'http://cms.test/api/geo/document-stats?collection=posts&id=7&days=7' })
+      ;(req.payload as any).findByID = vi.fn(async () => ({ id: 7, slug: 'hello' }))
+      const res = await ep('/geo/document-stats')(req as never)
+      const body = await res.json()
+      expect(body).toMatchObject({ path: '/blog/hello', days: 7, total: 1, timeZone: 'UTC' })
+      const call = find.mock.calls.find((c: any) => c[0].collection === CRAWLER_HITS_SLUG)![0] as any
+      expect(call.limit).toBe(20000)
+      expect(JSON.stringify(call.where)).toContain('/blog/hello.md')
+      const other = await ep('/geo/document-stats')(fakeRequest({ user: { id: 1 }, url: 'http://cms.test/api/geo/document-stats?collection=users&id=1' }).req as never)
+      expect(other.status).toBe(404)
     })
   })
 })

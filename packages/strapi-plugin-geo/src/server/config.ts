@@ -47,6 +47,8 @@ export interface StrapiLlmsConfig {
   checks?: CheckThresholds
   /** Show the read-only GEO panel in the content manager's edit view of the listed content types. Default true. */
   editorPanel?: boolean
+  /** Other hosts of the same site (e.g. `www.example.com`), counted with `siteURL`'s host in per-page visits. */
+  hosts?: string[]
 }
 
 export interface GeoStrapiConfig {
@@ -60,6 +62,13 @@ export interface GeoStrapiConfig {
   enabled: boolean
   /** Serve `/api/geo/llms.txt` and `/api/geo/llms-full.txt`. */
   llms: StrapiLlmsConfig | null
+  /** Setup status view: connectivity test limits. */
+  diagnostics?: {
+    /** Let the connectivity test request loopback / private addresses (local development only). Default false. */
+    allowPrivateNetwork?: boolean
+    /** Seconds to wait for the frontend proxy's report of the test request. Default 4. */
+    probeWaitSeconds?: number
+  }
 }
 
 export default {

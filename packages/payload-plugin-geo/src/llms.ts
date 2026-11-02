@@ -45,6 +45,8 @@ export interface LlmsOptions {
   cacheMaxAge?: number
   /** Thresholds of the editor panel's length suggestions. */
   checks?: CheckThresholds
+  /** Other hosts of the same site (e.g. `www.example.com`), counted with `siteURL`'s host in per-page visits. */
+  hosts?: string[]
 }
 
 /** Whether a collection has a top-level `slug` field (rows, collapsibles and unnamed tabs count as top level). */

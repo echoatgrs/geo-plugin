@@ -1,6 +1,7 @@
-import { GeoDashboard, type CrawlerStats } from '@garus-ltd/geo-dashboard'
+import { GeoDashboard, type CrawlerStats, type SetupReport } from '@garus-ltd/geo-dashboard'
+import type { DiagnosticItem } from '@garus-ltd/geo-core'
 import { useFetchClient } from '@strapi/strapi/admin'
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 
 const HITS_PATH = '/content-manager/collection-types/plugin::geo.crawler-hit'
 
@@ -12,7 +13,14 @@ function adminBase(): string {
 }
 
 export default function GeoPage() {
-  const { get } = useFetchClient()
+  const { get, post } = useFetchClient()
+  const setup = useMemo(
+    () => ({
+      load: async () => (await get<SetupReport>('/geo/setup')).data,
+      run: async (signal: AbortSignal) => (await post<{ active: DiagnosticItem[] }>('/geo/setup/test', {}, { signal })).data,
+    }),
+    [get, post],
+  )
   const fetchStats = useCallback(
     async (days: number) => (await get<CrawlerStats>(`/geo/stats?days=${days}`)).data,
     [get],
@@ -22,6 +30,7 @@ export default function GeoPage() {
       <GeoDashboard
         fetchStats={fetchStats}
         hitsHref={`${adminBase()}${HITS_PATH}`}
+        setup={setup}
       />
     </main>
   )

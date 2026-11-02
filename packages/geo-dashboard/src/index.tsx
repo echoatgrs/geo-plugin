@@ -1,7 +1,10 @@
 import type { CrawlerStats } from '@garus-ltd/geo-core'
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { GeoSetupStatus, type GeoSetupStatusProps } from './setup.js'
 
 export type { CrawlerStats }
+export { GeoSetupStatus, type GeoSetupStatusProps, type SetupReport } from './setup.js'
+export { DocumentTraffic, type DocumentStatsResult } from './document-traffic.js'
 export { GeoPanel, type GeoPanelProps, type PanelInspection, type PreviewVersion } from './panel.js'
 
 export interface GeoDashboardProps {
@@ -14,6 +17,8 @@ export interface GeoDashboardProps {
   /** Link to the raw crawler hit list in the CMS. */
   hitsHref?: string
   title?: string
+  /** Adds a "Setup status" tab (full layout only). */
+  setup?: GeoSetupStatusProps
 }
 
 // Colors work on light and dark admin themes: neutrals derive from the inherited text color.
@@ -111,7 +116,32 @@ export const proxy = withGeo({
   )
 }
 
-export function GeoDashboard({ fetchStats, compact, moreHref, hitsHref, title = 'AI visibility' }: GeoDashboardProps) {
+export function GeoDashboard(props: GeoDashboardProps) {
+  const [view, setView] = useState<'overview' | 'setup'>('overview')
+  if (props.compact || !props.setup) return <Overview {...props} />
+  const tab = (id: 'overview' | 'setup', label: string) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={view === id}
+      onClick={() => setView(id)}
+      style={{ font: 'inherit', padding: '6px 10px', border: 'none', borderBottom: `2px solid ${view === id ? ACCENT : 'transparent'}`, background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: view === id ? 600 : 400 }}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div role="tablist" aria-label="GEO" style={{ display: 'flex', gap: 4, borderBottom: '1px solid color-mix(in srgb, currentColor 12%, transparent)' }}>
+        {tab('overview', 'Overview')}
+        {tab('setup', 'Setup status')}
+      </div>
+      {view === 'overview' ? <Overview {...props} /> : <GeoSetupStatus {...props.setup} />}
+    </div>
+  )
+}
+
+function Overview({ fetchStats, compact, moreHref, hitsHref, title = 'AI visibility' }: GeoDashboardProps) {
   const [days, setDays] = useState(compact ? 7 : 30)
   const [stats, setStats] = useState<CrawlerStats | null>(null)
   const [error, setError] = useState<string | null>(null)

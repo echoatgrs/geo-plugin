@@ -1,5 +1,8 @@
 import {
   GEO_SECRET_HEADER,
+  IngestLog,
+  ProbeRegistry,
+  findProbeInBody,
   buildJsonLd,
   buildLlmsFullTxt,
   buildLlmsTxt,
@@ -19,6 +22,7 @@ import {
 import { publicAccess, type PublicAccess } from './access'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
 import { inspectStrapiEntry } from './inspect'
+import { documentStats, runSetupTest, setupReport, type SetupState } from './setup'
 import crawlerHitSchema from './content-types/crawler-hit/schema'
 import type { KoaContextLike, StrapiLike } from './types'
 
@@ -28,6 +32,8 @@ const PAGE_SIZE = 1000
 const MAX_STATS_HITS = 100_000
 
 let verifier: IPVerifier | undefined
+/** Diagnostic probe tokens and recent ingest results, per process. */
+const setupState: SetupState = { probes: new ProbeRegistry(), log: new IngestLog() }
 
 function getConfig(strapi: StrapiLike): GeoStrapiConfig {
   const plugin = strapi.plugin('geo')
@@ -37,6 +43,7 @@ function getConfig(strapi: StrapiLike): GeoStrapiConfig {
     storeSpoofed: plugin.config('storeSpoofed', true),
     enabled: plugin.config('enabled', true),
     llms: plugin.config('llms', null),
+    diagnostics: plugin.config('diagnostics', {}),
   }
 }
 
@@ -159,6 +166,8 @@ export const controllers = {
     async ingest(ctx: KoaContextLike) {
       const cfg = getConfig(strapi)
       if (!cfg.enabled) {
+        const probe = findProbeInBody(ctx.request.body, setupState.probes)
+        if (probe) setupState.probes.record(probe.token, 'disabled', probe)
         ctx.status = 503
         ctx.body = { ok: false, error: 'disabled' }
         return
@@ -167,6 +176,8 @@ export const controllers = {
         secret: cfg.secret || undefined,
         verifier: cfg.verifyIPs ? (verifier ??= createIPVerifier()) : undefined,
         storeSpoofed: cfg.storeSpoofed,
+        probes: setupState.probes,
+        log: setupState.log,
         store: {
           async save(hit) {
             await strapi.documents(CRAWLER_HIT_UID).create({ data: { ...hit } })
@@ -252,6 +263,12 @@ export const controllers = {
     },
   }),
 
+  setup: ({ strapi }: { strapi: StrapiLike }) => ({
+    report: (ctx: KoaContextLike) => setupReport(strapi, getConfig(strapi), setupState, CRAWLER_HIT_UID, ctx),
+    test: (ctx: KoaContextLike) => runSetupTest(strapi, getConfig(strapi), setupState, CRAWLER_HIT_UID, ctx),
+    documentStats: (ctx: KoaContextLike) => documentStats(strapi, getConfig(strapi), CRAWLER_HIT_UID, ctx),
+  }),
+
   stats: ({ strapi }: { strapi: StrapiLike }) => ({
     async stats(ctx: KoaContextLike) {
       const days = Number(ctx.query?.days ?? 7) || 7
@@ -291,6 +308,9 @@ export const routes = {
       { method: 'GET', path: '/stats', handler: 'stats.stats', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'GET', path: '/editor-config', handler: 'editor.config', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'POST', path: '/inspect', handler: 'editor.inspect', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'GET', path: '/setup', handler: 'setup.report', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'POST', path: '/setup/test', handler: 'setup.test', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'GET', path: '/document-stats', handler: 'setup.documentStats', config: { policies: ['admin::isAuthenticatedAdmin'] } },
     ],
   },
 }
