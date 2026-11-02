@@ -145,6 +145,8 @@ export interface LlmsSourceConfig {
   faqField?: string
   /** JSON-LD for each document. `false` turns it off. */
   jsonLd?: false | JsonLdSourceConfig
+  /** Field holding the document's sources / references. Only the editor panel uses it, to check it is filled. */
+  sourcesField?: string
 }
 
 export interface JsonLdSourceConfig {
@@ -158,12 +160,17 @@ export function getField(doc: Record<string, any>, field: string): unknown {
   return field.split('.').reduce<any>((value, key) => (value == null ? undefined : value[key]), doc)
 }
 
-function firstValue(doc: Record<string, any>, fields: string[]): unknown {
+/** First non-empty value among the field paths, and the path it came from. */
+function firstEntry(doc: Record<string, any>, fields: string[]): { value: unknown; field: string | null } {
   for (const f of fields) {
     const v = getField(doc, f)
-    if (v != null && v !== '' && !(Array.isArray(v) && v.length === 0)) return v
+    if (v != null && v !== '' && !(Array.isArray(v) && v.length === 0)) return { value: v, field: f }
   }
-  return undefined
+  return { value: undefined, field: null }
+}
+
+function firstValue(doc: Record<string, any>, fields: string[]): unknown {
+  return firstEntry(doc, fields).value
 }
 
 /** Strapi 4 wraps relations as `{ data: { attributes } }`; unwrap them. */
@@ -204,60 +211,152 @@ function dateString(value: unknown): string | null {
   return null
 }
 
-function firstString(doc: Record<string, any>, fields: string[]): string | undefined {
+function firstStringEntry(doc: Record<string, any>, fields: string[]): { value: string | undefined; field: string | null } {
   for (const f of fields) {
     const v = getField(doc, f)
-    if (typeof v === 'string' && v.trim()) return v
+    if (typeof v === 'string' && v.trim()) return { value: v, field: f }
   }
-  return undefined
+  return { value: undefined, field: null }
+}
+
+/** Field paths the mapping looks at for each property, in order. Configured fields replace the defaults. */
+export function sourceFields(source: LlmsSourceConfig) {
+  return {
+    title: [source.titleField ?? 'title', 'name'],
+    description: source.descriptionField ? [source.descriptionField] : ['description', 'excerpt', 'summary', 'meta.description'],
+    content: source.contentField ? [source.contentField] : ['content', 'body'],
+    image: source.imageField ? [source.imageField] : ['image', 'heroImage', 'coverImage', 'cover', 'featuredImage', 'meta.image'],
+    author: source.authorField ? [source.authorField] : ['author', 'authors'],
+    published: source.publishedField ? [source.publishedField] : ['publishedAt', 'publishedDate', 'createdAt'],
+    updated: ['updatedAt'],
+    faq: source.faqField ? [source.faqField] : [],
+  }
+}
+
+export interface LlmsMappingOptions {
+  name: string
+  siteURL: string
+  source: LlmsSourceConfig
+  markdown: (value: unknown) => string
+  /** Base for relative image URLs, e.g. the CMS URL. Default `siteURL`. */
+  mediaURL?: string
+}
+
+/** Which field each property of a mapped document came from (`null`: none found, a fallback applies). */
+export interface LlmsMappingSources {
+  url: 'url()' | 'slug' | null
+  title: string | null
+  description: string | null
+  content: string | null
+  image: string | null
+  author: string | null
+  published: string | null
+  updated: string | null
+  faq: string | null
+}
+
+export interface LlmsMapping {
+  document: LlmsDocument | null
+  sources: LlmsMappingSources
+  /** Frontend path or URL before it is joined with `siteURL`. */
+  path: string | null
+  /** Error thrown by the source's `url()` function. */
+  urlError?: string
+  /** Raw rich text value found for the content, before conversion. */
+  rawContent: unknown
+  /** Raw FAQ items before empty ones are dropped. */
+  rawFaq: unknown[] | null
+}
+
+/**
+ * Maps a CMS document like {@link toLlmsDocument}, and also reports which field each value came from.
+ * Used by the editor checks and previews, so they explain exactly what the public output does.
+ */
+export function mapLlmsDocument(doc: Record<string, any>, options: LlmsMappingOptions, strict = false): LlmsMapping {
+  const { source } = options
+  const fields = sourceFields(source)
+  let path: string | null = null
+  let urlSource: LlmsMappingSources['url'] = null
+  let urlError: string | undefined
+  if (source.url) {
+    try {
+      path = source.url(doc) ?? null
+      urlSource = 'url()'
+    } catch (error) {
+      if (strict) throw error
+      urlError = error instanceof Error ? error.message : String(error)
+    }
+  } else if (typeof doc.slug === 'string' && doc.slug) {
+    path = `/${options.name}/${doc.slug}`
+    urlSource = 'slug'
+  }
+  const title = firstStringEntry(doc, fields.title)
+  const description = firstStringEntry(doc, fields.description)
+  const content = (() => {
+    for (const f of fields.content) {
+      const v = getField(doc, f)
+      if (v != null) return { value: v, field: f }
+    }
+    return { value: undefined, field: null }
+  })()
+  const image = firstEntry(doc, fields.image)
+  const imageValue = imageURL(image.value)
+  const author = firstEntry(doc, fields.author)
+  const published = firstEntry(doc, fields.published)
+  const faqValue = source.faqField ? unwrap(getField(doc, source.faqField)) : undefined
+  const rawFaq = Array.isArray(faqValue) ? faqValue : null
+  const faq = rawFaq
+    ? rawFaq
+        .map((item: any) => ({ question: oneLine(String(item?.question ?? '')), answer: options.markdown(item?.answer).trim() }))
+        .filter((item) => item.question && item.answer)
+    : []
+  const jsonLd = source.jsonLd === false ? undefined : source.jsonLd
+  const sources: LlmsMappingSources = {
+    url: path ? urlSource : null,
+    title: title.field,
+    description: description.field,
+    content: content.field,
+    image: imageValue ? image.field : null,
+    author: author.field,
+    published: dateString(published.value) ? published.field : null,
+    updated: dateString(doc.updatedAt) ? 'updatedAt' : null,
+    faq: rawFaq ? source.faqField! : null,
+  }
+  const base = { sources, path, urlError, rawContent: content.value, rawFaq }
+  if (!path) return { ...base, document: null }
+  let extra: Record<string, unknown> | undefined
+  try {
+    extra = jsonLd?.extend?.(doc) ?? undefined
+  } catch (error) {
+    if (strict) throw error
+    extra = undefined
+  }
+  return {
+    ...base,
+    document: {
+      title: title.value ?? path,
+      url: joinURL(options.siteURL, path),
+      description: description.value ?? null,
+      section: source.section ?? options.name,
+      markdown: options.markdown(content.value),
+      updatedAt: dateString(doc.updatedAt),
+      publishedAt: dateString(published.value),
+      authors: names(author.value),
+      image: imageValue ? joinURL(options.mediaURL ?? options.siteURL, imageValue) : null,
+      faq,
+      schemaType: source.jsonLd === false ? undefined : (jsonLd?.type ?? 'Article'),
+      jsonLd: extra,
+    },
+  }
 }
 
 /**
  * Maps a CMS document to an llms document. Returns null when no URL can be determined,
  * since an entry without a URL is useless to an assistant.
  */
-export function toLlmsDocument(
-  doc: Record<string, any>,
-  options: {
-    name: string
-    siteURL: string
-    source: LlmsSourceConfig
-    markdown: (value: unknown) => string
-    /** Base for relative image URLs, e.g. the CMS URL. Default `siteURL`. */
-    mediaURL?: string
-  },
-): LlmsDocument | null {
-  const { source } = options
-  const path = source.url ? source.url(doc) : typeof doc.slug === 'string' ? `/${options.name}/${doc.slug}` : null
-  if (!path) return null
-  const title = firstString(doc, [source.titleField ?? 'title', 'name']) ?? path
-  const description = source.descriptionField
-    ? firstString(doc, [source.descriptionField])
-    : firstString(doc, ['description', 'excerpt', 'summary', 'meta.description'])
-  const contentFields = source.contentField ? [source.contentField] : ['content', 'body']
-  const content = contentFields.map((f) => getField(doc, f)).find((v) => v != null)
-  const image = imageURL(firstValue(doc, source.imageField ? [source.imageField] : ['image', 'heroImage', 'coverImage', 'cover', 'featuredImage', 'meta.image']))
-  const faqValue = source.faqField ? unwrap(getField(doc, source.faqField)) : undefined
-  const faq = Array.isArray(faqValue)
-    ? faqValue
-        .map((item: any) => ({ question: oneLine(String(item?.question ?? '')), answer: options.markdown(item?.answer).trim() }))
-        .filter((item) => item.question && item.answer)
-    : []
-  const jsonLd = source.jsonLd === false ? undefined : source.jsonLd
-  return {
-    title,
-    url: joinURL(options.siteURL, path),
-    description: description ?? null,
-    section: source.section ?? options.name,
-    markdown: options.markdown(content),
-    updatedAt: dateString(doc.updatedAt),
-    publishedAt: dateString(firstValue(doc, source.publishedField ? [source.publishedField] : ['publishedAt', 'publishedDate', 'createdAt'])),
-    authors: names(firstValue(doc, source.authorField ? [source.authorField] : ['author', 'authors'])),
-    image: image ? joinURL(options.mediaURL ?? options.siteURL, image) : null,
-    faq,
-    schemaType: source.jsonLd === false ? undefined : (jsonLd?.type ?? 'Article'),
-    jsonLd: jsonLd?.extend?.(doc) ?? undefined,
-  }
+export function toLlmsDocument(doc: Record<string, any>, options: LlmsMappingOptions): LlmsDocument | null {
+  // Strict: a throwing `url()` or `jsonLd.extend()` surfaces as an error on the public routes, as before.
+  return mapLlmsDocument(doc, options, true).document
 }
 
 /** Frontend path of a `.md` request: `/blog/post.md` -> `/blog/post`, `/index.md` -> `/`. Null if not a `.md` path. */

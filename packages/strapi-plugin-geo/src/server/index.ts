@@ -18,6 +18,7 @@ import {
 } from '@garus-ltd/geo-core'
 import { publicAccess, type PublicAccess } from './access'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
+import { inspectStrapiEntry } from './inspect'
 import crawlerHitSchema from './content-types/crawler-hit/schema'
 import type { KoaContextLike, StrapiLike } from './types'
 
@@ -228,6 +229,29 @@ export const controllers = {
     }
   },
 
+  editor: ({ strapi }: { strapi: StrapiLike }) => ({
+    /** Which content types get the edit view panel. Admin only. */
+    async config(ctx: KoaContextLike) {
+      const { llms } = getConfig(strapi)
+      ctx.set?.('Cache-Control', 'private, no-store')
+      ctx.status = 200
+      ctx.body = { contentTypes: llms && llms.editorPanel !== false ? Object.keys(llms.contentTypes) : [] }
+    },
+    /** Checks and previews of the entry being edited (current unsaved values). Admin only, never cached. */
+    async inspect(ctx: KoaContextLike) {
+      const { llms } = getConfig(strapi)
+      ctx.set?.('Cache-Control', 'private, no-store')
+      if (!llms) {
+        ctx.status = 404
+        ctx.body = { error: 'llms is not configured' }
+        return
+      }
+      const result = await inspectStrapiEntry(strapi, llms, ctx, ctx.request.body)
+      ctx.status = result.status
+      ctx.body = result.body
+    },
+  }),
+
   stats: ({ strapi }: { strapi: StrapiLike }) => ({
     async stats(ctx: KoaContextLike) {
       const days = Number(ctx.query?.days ?? 7) || 7
@@ -265,6 +289,8 @@ export const routes = {
     type: 'admin',
     routes: [
       { method: 'GET', path: '/stats', handler: 'stats.stats', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'GET', path: '/editor-config', handler: 'editor.config', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'POST', path: '/inspect', handler: 'editor.inspect', config: { policies: ['admin::isAuthenticatedAdmin'] } },
     ],
   },
 }

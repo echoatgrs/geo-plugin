@@ -41,6 +41,7 @@ describe('geoPlugin', () => {
       'get /geo/stats',
       'get /geo/llms.txt',
       'get /geo/llms-full.txt',
+      'post /geo/inspect',
       'get /geo/markdown',
       'get /geo/jsonld',
     ])
@@ -50,6 +51,15 @@ describe('geoPlugin', () => {
     })
     const hits = config.collections!.find((c) => c.slug === CRAWLER_HITS_SLUG)!
     expect(hits.admin?.components?.beforeList?.[0]).toMatchObject({ clientProps: { compact: false } })
+    const posts = config.collections!.find((c) => c.slug === 'posts')!
+    expect(posts.fields.at(-1)).toMatchObject({
+      name: 'geoPanel',
+      type: 'ui',
+      admin: { position: 'sidebar', components: { Field: { path: 'payload-plugin-geo/client#GeoEditPanel', clientProps: { inspectURL: '/api/geo/inspect', collection: 'posts' } } } },
+    })
+    expect(hits.fields.some((f: any) => f.name === 'geoPanel')).toBe(false)
+    const off = geoPlugin({ editorPanel: false, llms: { siteURL: 'https://s', collections: { posts: {} } } })(base)
+    expect(off.collections!.find((c) => c.slug === 'posts')!.fields).toEqual([])
   })
 
   it('stores hits sent by the frontend proxy', async () => {
@@ -147,5 +157,81 @@ describe('geoPlugin', () => {
     expect(txt.headers.get('cache-control')).toBe('public, max-age=30')
     const dflt = await endpoint('/geo/markdown').handler(fakeRequest({ url: 'http://cms.test/api/geo/markdown?path=/nope' }).req as never)
     expect(dflt.headers.get('cache-control')).toBe('public, max-age=60')
+  })
+
+  describe('inspect endpoint', () => {
+    const inspectReq = (body: unknown, user?: object, overrides: Record<string, any> = {}) => {
+      const stored = { id: 7, title: 'Stored', slug: 'hello', excerpt: 'Stored excerpt', _status: 'published', updatedAt: '2026-10-02T00:00:00.000Z', publishedAt: '2026-10-01T00:00:00.000Z' }
+      const find = vi.fn(async (args: any) => {
+        if (args.overrideAccess === true) return { docs: overrides.published === false ? [] : [stored] }
+        if (args.user) return { docs: [stored] }
+        // Anonymous query from the public rules.
+        return { docs: overrides.publicDocs ?? [stored] }
+      })
+      const findByID = vi.fn(async (args: any) => {
+        if (overrides.forbidden) throw Object.assign(new Error('Forbidden'), { status: 403 })
+        return args.collection === 'users' ? { id: 3, name: 'Ada' } : stored
+      })
+      return {
+        req: { url: 'http://cms.test/api/geo/inspect', user, headers: new Headers(), json: async () => body, payload: { find, findByID, logger: { warn: vi.fn() } } },
+        find,
+        findByID,
+      }
+    }
+    const withAuthor = geoPlugin({
+      verifyIPs: false,
+      llms: { siteURL: 'https://site.test', name: 'Acme', collections: { posts: { url: (d) => `/blog/${d.slug}` } } },
+    })({
+      serverURL: 'https://cms.test',
+      collections: [{ slug: 'posts', fields: [{ name: 'title', type: 'text' }, { name: 'slug', type: 'text' }, { name: 'author', type: 'relationship', relationTo: 'users' }], versions: { drafts: true } }],
+    } as unknown as Config)
+    const handler = withAuthor.endpoints!.find((e) => e.path === '/geo/inspect')!.handler
+
+    it('refuses anonymous callers and unconfigured collections, and is never cached', async () => {
+      const anon = await handler(inspectReq({ collection: 'posts' }).req as never)
+      expect(anon.status).toBe(401)
+      expect(anon.headers.get('cache-control')).toBe('private, no-store')
+      const other = await handler(inspectReq({ collection: 'users' }, { id: 1 }).req as never)
+      expect(other.status).toBe(404)
+      const proto = await handler(inspectReq({ collection: '__proto__' }, { id: 1 }).req as never)
+      expect(proto.status).toBe(404)
+      const forbidden = await handler(inspectReq({ collection: 'posts', id: 7 }, { id: 1 }, { forbidden: true }).req as never)
+      expect(forbidden.status).toBe(403)
+    })
+
+    it('checks the current unsaved edits over the stored document, resolving the author relation', async () => {
+      const { req, findByID } = inspectReq({ collection: 'posts', id: 7, data: { title: 'Edited title', author: 3 } }, { id: 1 })
+      const res = await handler(req as never)
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.document.title).toBe('Edited title')
+      expect(body.document.authors).toEqual(['Ada'])
+      expect(findByID).toHaveBeenCalledWith(expect.objectContaining({ collection: 'users', id: 3, overrideAccess: false }))
+      expect(body.markdown).toContain('# Edited title')
+      expect(body.checks.find((c: any) => c.ruleId === 'GEO-PUBLIC').status).toBe('pass')
+      expect(body.publicLinks).toEqual({
+        page: 'https://site.test/blog/hello',
+        markdown: 'https://cms.test/api/geo/markdown?path=%2Fblog%2Fhello',
+        jsonLd: 'https://cms.test/api/geo/jsonld?path=%2Fblog%2Fhello',
+      })
+      expect(body.validators[0].url).toContain('validator.schema.org')
+    })
+
+    it('reports a draft that anonymous visitors cannot see, without public links', async () => {
+      const { req } = inspectReq({ collection: 'posts', id: 7, data: {} }, { id: 1 }, { published: false, publicDocs: [] })
+      const body = await (await handler(req as never)).json()
+      expect(body.checks.find((c: any) => c.ruleId === 'GEO-STATUS').status).toBe('warning')
+      expect(body.checks.find((c: any) => c.ruleId === 'GEO-PUBLIC')).toMatchObject({ status: 'warning', message: expect.stringContaining('not published') })
+      expect(body.publicLinks).toBeUndefined()
+      expect(body.validators).toBeUndefined()
+    })
+
+    it('works for a new document that was never saved', async () => {
+      const { req } = inspectReq({ collection: 'posts', data: { title: 'New' } }, { id: 1 })
+      const body = await (await handler(req as never)).json()
+      expect(body.checks.find((c: any) => c.ruleId === 'GEO-STATUS').status).toBe('notApplicable')
+      expect(body.checks.find((c: any) => c.ruleId === 'GEO-URL').status).toBe('warning')
+      expect(body.document.url).toBe('https://site.test/blog/undefined')
+    })
   })
 })

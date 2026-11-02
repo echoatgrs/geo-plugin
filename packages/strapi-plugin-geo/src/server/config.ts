@@ -1,4 +1,4 @@
-import type { LlmsSourceConfig } from '@garus-ltd/geo-core'
+import type { CheckThresholds, LlmsSourceConfig } from '@garus-ltd/geo-core'
 
 export interface StrapiLlmsSource extends LlmsSourceConfig {
   /** Extra Document Service filters, e.g. `{ noindex: { $ne: true } }`. */
@@ -43,6 +43,10 @@ export interface StrapiLlmsConfig {
    * this long. `0` sends `no-store`.
    */
   cacheMaxAge?: number
+  /** Thresholds of the editor panel's length suggestions. */
+  checks?: CheckThresholds
+  /** Show the read-only GEO panel in the content manager's edit view of the listed content types. Default true. */
+  editorPanel?: boolean
 }
 
 export interface GeoStrapiConfig {

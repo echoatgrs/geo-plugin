@@ -19,6 +19,8 @@ export interface PublicAccess {
   allowed: Set<string>
   /** Entry as the anonymous REST API would return it, or null when it must not be served. */
   filter(uid: string, source: StrapiLlmsSource, entry: Record<string, any>): Promise<Record<string, any> | null>
+  /** Strapi's output sanitizer with the Public ability (or without auth when `publicOnly` is false). */
+  sanitize(uid: string, entry: Record<string, any>): Promise<Record<string, any>>
 }
 
 const PUBLIC_ROLE_UID = 'plugin::users-permissions.role'
@@ -135,6 +137,7 @@ export async function publicAccess(strapi: StrapiLike, llms: StrapiLlmsConfig): 
     const sanitize = sanitizer(strapi, null)
     return {
       allowed: new Set(uids),
+      sanitize,
       async filter(uid, source, entry) {
         const clean = await sanitize(uid, entry)
         return (await runIsPublic(strapi, uid, source, clean)) ? clean : null
@@ -145,7 +148,7 @@ export async function publicAccess(strapi: StrapiLike, llms: StrapiLlmsConfig): 
   const ability = await publicAbility(strapi)
   if (!ability) {
     warnOnce(strapi, '[geo] No Users & Permissions Public role found, so llms.txt lists nothing. Set `llms.publicOnly: false` to serve the configured content types anyway.')
-    return { allowed: new Set(), filter: async () => null }
+    return { allowed: new Set(), filter: async () => null, sanitize: async (_uid, entry) => entry }
   }
 
   const allowed = new Set<string>()
@@ -182,6 +185,7 @@ export async function publicAccess(strapi: StrapiLike, llms: StrapiLlmsConfig): 
   const sanitize = sanitizer(strapi, auth)
   return {
     allowed,
+    sanitize,
     async filter(uid, source, entry) {
       if (!allowed.has(uid)) return null
       const clean = await sanitize(uid, entry)

@@ -228,6 +228,36 @@ and `publisher` are filled in. Site-wide `llms.logo`, `llms.language` and `llms.
 URLs, default the CMS server URL) are optional. The core builder `buildJsonLd(site, doc)` is exported from
 `@garus-ltd/geo-core` if you'd rather build it in the frontend.
 
+## Editor GEO panel
+
+Every collection / content type in the `llms` config gets a read-only **GEO check** panel in its edit view (Payload:
+sidebar; Strapi: content manager side panel). Other collections show nothing. It never writes to the document,
+doesn't block saving or publishing, can be collapsed, and works on the current unsaved edits (checks run about 0.8 s
+after typing stops).
+
+- **Checks** are deterministic rules, each with a rule id, status (pass / warning / error / N/A, shown as text, not
+  only color), reason, field and suggestion: title, description length, body empty or not convertible, subheadings
+  on long bodies (a suggestion only), author and date fallbacks, image URL, empty FAQ items, configured field paths
+  that don't exist, frontend URL (including `/undefined` slugs), publish status and anonymous visibility. Sources are
+  checked only when you map a field (`sourcesField`); the plugin never judges whether content is true. There is no
+  "AI ranking" score.
+- **Markdown** and **JSON-LD** previews use the same code as the public routes, so the "published version" preview is
+  byte-identical to `/api/geo/markdown` and `/api/geo/jsonld`. "Current edits" previews drafts and unsaved changes.
+  Both come from an admin-only endpoint (`POST /api/geo/inspect` in Payload, `POST /geo/inspect` in the Strapi admin
+  API) that requires a logged-in user who can read the collection, only accepts configured collections, and answers
+  `Cache-Control: private, no-store`. In Strapi the preview also goes through the Public sanitizer, so it shows what
+  the public will get.
+- The JSON-LD tab adds plugin checks (parses, `<` escaped for `<script>`, required / recommended properties, date
+  order, absolute URLs, FAQPage on the same page) and links to the Schema.org validator and Google Rich Results Test
+  for the live public URL only. Passing the plugin's checks is not the same as rich result eligibility.
+- **Fields** shows which document field fed each output value and the fallback used when it was empty.
+
+Options: `editorPanel: false` turns the panel off (Payload: plugin option; Strapi: `llms.editorPanel`);
+`llms.checks: { descriptionMin, descriptionMax, titleMax, headingsAfter }` tunes the length suggestions;
+`sourcesField` (per collection) turns on the sources check. Payload needs `payload generate:importmap` after
+upgrading so it finds the `GeoEditPanel` component. In Payload, field-level read access is not applied to the
+"current edits" preview (collection access is).
+
 Already have middleware? Wrap it: `withGeo(options, yourMiddleware)`.
 `@garus-ltd/geo-next` only uses Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in a Cloudflare Worker.
 

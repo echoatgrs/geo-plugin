@@ -29,7 +29,7 @@ function fakeStrapi(
   return { strapi, create, findMany }
 }
 
-function ctx(body: unknown, secret = '', query: Record<string, unknown> = {}): KoaContextLike & { headers: Record<string, string> } {
+function ctx(body: unknown, secret = '', query: Record<string, unknown> = {}): KoaContextLike & { headers: Record<string, string>; state?: any } {
   const headers: Record<string, string> = {}
   return {
     request: { body, get: (f) => (f === 'x-geo-secret' ? secret : '') },
@@ -321,6 +321,86 @@ describe('strapi-plugin-geo', () => {
     it('rejects a non-function isPublic and a bad cacheMaxAge in the config', () => {
       expect(() => plugin.config.validator({ llms: { siteURL: 'x', contentTypes: { a: { isPublic: true as any } } } })).toThrow(/isPublic/)
       expect(() => plugin.config.validator({ llms: { siteURL: 'x', contentTypes: {}, cacheMaxAge: -1 } })).toThrow(/cacheMaxAge/)
+    })
+  })
+
+  describe('editor inspect', () => {
+    const llmsCfg = { siteURL: 'https://site.test', name: 'Acme', contentTypes: { [ARTICLE]: { url: (d: any) => `/blog/${d.slug}`, faqField: 'faq' } } }
+    function setup(opts: { published?: boolean; canRead?: boolean; publicActions?: string[] } = {}) {
+      resetWarnings()
+      const draft = { documentId: 'd1', title: 'Draft title', slug: 'hello', publishedAt: null, author: { documentId: 'a1', name: 'Old' }, secretNote: 'x' }
+      const live = { ...draft, title: 'Live title', publishedAt: '2026-10-01T00:00:00.000Z' }
+      const f = fakeStrapi({ llms: llmsCfg }, {}, opts.publicActions ?? [`${ARTICLE}.find`])
+      f.strapi.contentType = (uid) =>
+        uid === ARTICLE
+          ? { info: { pluralName: 'articles' }, options: { draftAndPublish: true }, attributes: { title: {}, slug: {}, faq: {}, secretNote: {}, author: { type: 'relation', relation: 'manyToOne', target: 'api::author.author' } } }
+          : uid === 'plugin::users-permissions.role' ? {} : undefined
+      const findOne = vi.fn(async (uid: string, params: any) => {
+        if (uid === 'api::author.author') return { documentId: params.documentId, name: 'New author' }
+        if (params.status === 'published') return opts.published === false ? null : live
+        return draft
+      })
+      f.strapi.documents = (uid) => ({ create: f.create, findMany: async () => [], findOne: (p: any) => findOne(uid, p) }) as any
+      const can = vi.fn(() => opts.canRead !== false)
+      const call = async (body: unknown) => {
+        const c = ctx(body)
+        c.state = { userAbility: { can } }
+        await controllers.editor({ strapi: f.strapi }).inspect(c)
+        return c
+      }
+      return { ...f, call, can, findOne }
+    }
+
+    it('needs content-manager read permission and a configured content type, and is never cached', async () => {
+      const denied = setup({ canRead: false })
+      const c = await denied.call({ model: ARTICLE, documentId: 'd1', data: {} })
+      expect(c.status).toBe(403)
+      expect(c.headers['Cache-Control']).toBe('private, no-store')
+      expect(denied.can).toHaveBeenCalledWith('plugin::content-manager.explorer.read', ARTICLE)
+      const other = await setup().call({ model: 'api::secret.secret', data: {} })
+      expect(other.status).toBe(404)
+      expect((await setup().call({ model: 'constructor', data: {} })).status).toBe(404)
+      expect(plugin.routes.admin.routes.find((r) => r.path === '/inspect')).toMatchObject({ method: 'POST', config: { policies: ['admin::isAuthenticatedAdmin'] } })
+    })
+
+    it('checks current form values, applies relation changes and reports public state with links', async () => {
+      const t = setup()
+      const c = await t.call({ model: ARTICLE, documentId: 'd1', data: { title: 'Typed now', author: { connect: [{ documentId: 'a2' }], disconnect: [{ documentId: 'a1' }] } } })
+      expect(c.status).toBe(200)
+      const body = c.body as any
+      expect(body.document.title).toBe('Typed now')
+      expect(body.document.authors).toEqual(['New author'])
+      expect(body.document.publishedAt).toBe('2026-10-01T00:00:00.000Z')
+      expect(body.checks.find((x: any) => x.ruleId === 'GEO-PUBLIC').status).toBe('pass')
+      expect(body.publicLinks.markdown).toBe('/api/geo/markdown?path=%2Fblog%2Fhello')
+    })
+
+    it('previews the published version like the public output', async () => {
+      const t = setup()
+      const c = await t.call({ model: ARTICLE, documentId: 'd1', version: 'published' })
+      expect((c.body as any).document.title).toBe('Live title')
+      const unpublished = setup({ published: false })
+      const u = await unpublished.call({ model: ARTICLE, documentId: 'd1', version: 'published' })
+      expect(u.status).toBe(404)
+      const cur = await unpublished.call({ model: ARTICLE, documentId: 'd1', data: {} })
+      expect((cur.body as any).checks.find((x: any) => x.ruleId === 'GEO-PUBLIC')).toMatchObject({ status: 'warning', message: expect.stringContaining('not published') })
+      expect((cur.body as any).publicLinks).toBeUndefined()
+    })
+
+    it('says when the Public role cannot read the type, and works for unsaved entries', async () => {
+      const t = setup({ publicActions: [] })
+      const c = await t.call({ model: ARTICLE, documentId: 'd1', data: {} })
+      expect((c.body as any).checks.find((x: any) => x.ruleId === 'GEO-PUBLIC').message).toContain('Public role')
+      const fresh = await setup().call({ model: ARTICLE, data: { title: 'New one' } })
+      expect(fresh.status).toBe(200)
+      expect((fresh.body as any).checks.find((x: any) => x.ruleId === 'GEO-STATUS').status).toBe('notApplicable')
+    })
+
+    it('lists the content types that get the panel', async () => {
+      const t = setup()
+      const c = ctx(undefined)
+      await controllers.editor({ strapi: t.strapi }).config(c)
+      expect(c.body).toEqual({ contentTypes: [ARTICLE] })
     })
   })
 })

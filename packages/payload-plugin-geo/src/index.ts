@@ -10,6 +10,7 @@ import {
 } from '@garus-ltd/geo-core'
 import type { CollectionConfig, Config, Endpoint, Plugin } from 'payload'
 import { CRAWLER_HITS_SLUG, crawlerHitsCollection } from './collection.js'
+import { inspectPayloadDocument } from './inspect.js'
 import {
   loadDocumentByPath,
   loadLlmsDocuments,
@@ -37,6 +38,11 @@ export interface GeoPluginOptions {
   dashboard?: boolean
   /** Keep the collection and schema but stop accepting hits. Default true. */
   enabled?: boolean
+  /**
+   * Add a read-only GEO check panel to the sidebar of every collection in `llms.collections`. Default true.
+   * It stores nothing and never changes the document.
+   */
+  editorPanel?: boolean
 }
 
 export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsDocuments, type LlmsOptions, type PayloadLlmsSource }
@@ -68,7 +74,34 @@ export const geoPlugin =
     const verifyIPs = options.verifyIPs ?? true
     const verifier = verifyIPs ? createIPVerifier(verifyIPs === true ? {} : verifyIPs) : undefined
     const collection = crawlerHitsCollection(options.collection)
-    const collections = [...(config.collections ?? []), collection]
+    const apiRoute = config.routes?.api ?? '/api'
+    const editorPanel = options.llms && options.editorPanel !== false
+    const collections = [
+      ...(config.collections ?? []).map((c) =>
+        editorPanel && options.llms!.collections[c.slug]
+          ? {
+              ...c,
+              fields: [
+                ...c.fields,
+                {
+                  name: 'geoPanel',
+                  type: 'ui' as const,
+                  admin: {
+                    position: 'sidebar' as const,
+                    components: {
+                      Field: {
+                        path: 'payload-plugin-geo/client#GeoEditPanel',
+                        clientProps: { inspectURL: `${config.serverURL ?? ''}${apiRoute}/geo/inspect`, collection: c.slug },
+                      },
+                    },
+                  },
+                },
+              ],
+            }
+          : c,
+      ),
+      collection,
+    ]
 
     const ingestEndpoint: Endpoint = {
       path: options.ingestPath ?? '/geo/ingest',
@@ -129,6 +162,21 @@ export const geoPlugin =
             text(renderLlms(llms, await loadLlmsDocuments(req.payload, llms, collections, config.serverURL), full), 200, 'text/plain', llms.cacheMaxAge),
         })
       }
+      // Editor checks and previews of the current (possibly unsaved) edits: logged-in users only, never cached.
+      endpoints.push({
+        path: '/geo/inspect',
+        method: 'post',
+        handler: async (req) => {
+          let body: unknown
+          try {
+            body = await req.json?.()
+          } catch {
+            return Response.json({ error: 'invalid json' }, { status: 400, headers: { 'cache-control': 'private, no-store' } })
+          }
+          const result = await inspectPayloadDocument(req, { llms, collections, serverURL: config.serverURL, apiRoute }, body)
+          return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'private, no-store' } })
+        },
+      })
       // Per-page Markdown and JSON-LD: `?path=/blog/post` (the frontend path, without `.md`).
       endpoints.push(
         {
@@ -159,11 +207,11 @@ export const geoPlugin =
     }
 
     if (options.dashboard !== false) {
-      const apiRoute = `${config.serverURL ?? ''}${config.routes?.api ?? '/api'}`
+      const statsBase = `${config.serverURL ?? ''}${apiRoute}`
       const hitsHref = `${config.routes?.admin ?? '/admin'}/collections/${collection.slug}`
       const component = (compact: boolean) => ({
         path: 'payload-plugin-geo/client#GeoDashboardClient',
-        clientProps: { statsURL: `${apiRoute}/geo/stats`, compact, moreHref: hitsHref, hitsHref },
+        clientProps: { statsURL: `${statsBase}/geo/stats`, compact, moreHref: hitsHref, hitsHref },
       })
       collection.admin = {
         ...collection.admin,

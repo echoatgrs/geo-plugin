@@ -7,6 +7,7 @@ import {
   lastSegment,
   richTextToMarkdown,
   toLlmsDocument,
+  type CheckThresholds,
   type JsonLd,
   type LlmsDocument,
   type LlmsSourceConfig,
@@ -42,10 +43,12 @@ export interface LlmsOptions {
    * The plugin itself caches nothing; a CDN may keep serving an unpublished page for up to this long. `0` sends `no-store`.
    */
   cacheMaxAge?: number
+  /** Thresholds of the editor panel's length suggestions. */
+  checks?: CheckThresholds
 }
 
 /** Whether a collection has a top-level `slug` field (rows, collapsibles and unnamed tabs count as top level). */
-function hasField(fields: Field[] | undefined, name: string): boolean {
+export function hasField(fields: Field[] | undefined, name: string): boolean {
   return (fields ?? []).some((f: any) => {
     if (f.name === name) return true
     if ((f.type === 'row' || f.type === 'collapsible') && hasField(f.fields, name)) return true
@@ -54,7 +57,7 @@ function hasField(fields: Field[] | undefined, name: string): boolean {
   })
 }
 
-async function queryCollection(
+export async function queryCollection(
   payload: Payload,
   slug: string,
   config: CollectionConfig,
@@ -83,7 +86,7 @@ async function queryCollection(
   }
 }
 
-function mapDoc(doc: Record<string, any>, slug: string, source: PayloadLlmsSource, options: LlmsOptions, mediaURL?: string) {
+export function mapDoc(doc: Record<string, any>, slug: string, source: PayloadLlmsSource, options: LlmsOptions, mediaURL?: string) {
   return toLlmsDocument(doc, {
     name: slug,
     siteURL: options.siteURL,

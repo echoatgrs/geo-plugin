@@ -2,6 +2,7 @@ import type { CrawlerStats } from '@garus-ltd/geo-core'
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 
 export type { CrawlerStats }
+export { GeoPanel, type GeoPanelProps, type PanelInspection, type PreviewVersion } from './panel.js'
 
 export interface GeoDashboardProps {
   /** Loads stats for the last `days` days. Each CMS passes its own authenticated fetch. */

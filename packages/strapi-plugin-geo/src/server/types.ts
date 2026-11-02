@@ -3,6 +3,7 @@
 export interface DocumentServiceLike {
   create(params: { data: Record<string, unknown> }): Promise<unknown>
   findMany(params?: Record<string, unknown>): Promise<Record<string, any>[]>
+  findOne?(params: Record<string, unknown>): Promise<Record<string, any> | null>
 }
 
 export interface StrapiLike {
@@ -27,6 +28,7 @@ export interface StrapiLike {
 export interface KoaContextLike {
   request: { body?: unknown; get(field: string): string }
   query?: Record<string, unknown>
+  state?: { userAbility?: { can(action: string, subject?: string): boolean } }
   status: number
   body: unknown
   set?(field: string, value: string): void
