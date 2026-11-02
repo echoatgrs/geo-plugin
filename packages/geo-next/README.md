@@ -32,4 +32,7 @@ const jsonLd = await fetchJsonLd({ source: `${process.env.CMS_URL}/api/geo/jsonl
 return <>{jsonLd && <script {...jsonLdScriptProps(jsonLd)} />}</>
 ```
 
+`markdown.source` may be a path (`/api/geo/markdown`) when the CMS runs in the same app. `fetchJsonLd` needs an absolute
+`source`, or a path plus `base` (e.g. `base: 'http://localhost:3000'`).
+
 Uses only Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in Cloudflare Workers.

@@ -32,7 +32,10 @@ export interface GeoTrackOptions {
 }
 
 export interface MarkdownOptions {
-  /** CMS Markdown endpoint, e.g. `https://cms.example.com/api/geo/markdown`. Gets `?path=/blog/post`. */
+  /**
+   * CMS Markdown endpoint, e.g. `https://cms.example.com/api/geo/markdown`. Gets `?path=/blog/post`.
+   * A path such as `/api/geo/markdown` is resolved against the request, for a CMS in the same app (Payload).
+   */
   source: string
   /** Also answer `Accept: text/markdown` on the normal URL. Default true. */
   negotiate?: boolean
@@ -123,6 +126,9 @@ export async function markdownResponse(request: Request, options: MarkdownOption
   if (mdPath === null && STATIC_PATH.test(url.pathname)) return null
 
   const source = new URL(options.source, url)
+  // The proxy's own fetch of the CMS endpoint (same app, e.g. Payload) comes back through the proxy with
+  // `Accept: text/markdown`; answering it would fetch the endpoint again, forever.
+  if (source.origin === url.origin && source.pathname === url.pathname) return null
   source.searchParams.set('path', mdPath ?? url.pathname)
   const upstream = await (options.fetch ?? globalThis.fetch)(source, { headers: { accept: 'text/markdown' } }).catch(() => null)
   if (!upstream?.ok) return null
@@ -193,8 +199,13 @@ export function llmsRoute(options: LlmsRouteOptions): (request: Request) => Prom
 }
 
 export interface JsonLdOptions {
-  /** CMS JSON-LD endpoint, e.g. `https://cms.example.com/api/geo/jsonld`. */
+  /** CMS JSON-LD endpoint, e.g. `https://cms.example.com/api/geo/jsonld`, or a path such as `/api/geo/jsonld` with `base`. */
   source: string
+  /**
+   * Origin a relative `source` is resolved against, e.g. `http://localhost:3000` when the CMS runs in the same app.
+   * Server components have no request URL to resolve it against, so a relative `source` needs this.
+   */
+  base?: string
   /** Frontend path of the page, e.g. `/blog/hello`. */
   path: string
   /** Extra `fetch` options, e.g. `{ next: { revalidate: 300 } }` in Next.js. */
@@ -204,7 +215,15 @@ export interface JsonLdOptions {
 
 /** JSON-LD for a page from the CMS, or null when the page has none. Never throws. */
 export async function fetchJsonLd(options: JsonLdOptions): Promise<JsonLd | null> {
-  const url = new URL(options.source)
+  let url: URL
+  try {
+    url = new URL(options.source, options.base)
+  } catch {
+    console.warn(
+      `[geo] fetchJsonLd: cannot resolve source "${options.source}". Use an absolute URL, or pass \`base\` (e.g. http://localhost:3000).`,
+    )
+    return null
+  }
   url.searchParams.set('path', options.path)
   try {
     const res = await (options.fetch ?? globalThis.fetch)(url, { ...options.init, headers: { accept: 'application/ld+json' } })

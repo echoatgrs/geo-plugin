@@ -105,6 +105,42 @@ describe('markdown', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
+  it('does not answer its own fetch of a same-app CMS endpoint', async () => {
+    const { event } = setup()
+    const handler = vi.fn(() => 'next')
+    let calls = 0
+    // The CMS lives in the same app, so the proxy sees its own Markdown fetch, with Accept: text/markdown.
+    const proxy = withGeo(
+      {
+        endpoint: '/api/geo/ingest',
+        markdown: {
+          source: '/api/geo/markdown',
+          fetch: (async (url: URL, init: RequestInit) => {
+            if (++calls > 5) throw new Error('loop')
+            const inner = await proxy(new Request(url, { headers: init.headers }), event)
+            return inner instanceof Response ? inner : new Response(`# from CMS ${url.searchParams.get('path')}\n`)
+          }) as never,
+        },
+      },
+      handler,
+    )
+    const res = await proxy(new Request('https://site.test/blog/hello.md'), event)
+    expect(await (res as Response).text()).toBe('# from CMS /blog/hello\n')
+    expect(calls).toBe(1)
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it('resolves a relative JSON-LD source against base, and never throws without one', async () => {
+    const fetch = vi.fn(async (url: URL) => Response.json({ url: String(url) }))
+    expect(await fetchJsonLd({ source: '/api/geo/jsonld', base: 'http://localhost:3000', path: '/blog/a', fetch: fetch as never })).toEqual({
+      url: 'http://localhost:3000/api/geo/jsonld?path=%2Fblog%2Fa',
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(await fetchJsonLd({ source: '/api/geo/jsonld', path: '/blog/a', fetch: fetch as never })).toBeNull()
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
   it('fetches JSON-LD and builds safe script props', async () => {
     const fetch = vi.fn(async (url: URL) => Response.json({ path: url.searchParams.get('path') }))
     expect(await fetchJsonLd({ source: 'https://cms.test/api/geo/jsonld', path: '/blog/hello', fetch: fetch as never })).toEqual({ path: '/blog/hello' })

@@ -139,6 +139,8 @@ export const proxy = withGeo({
 
 Now `/blog/post.md` returns the article as Markdown, and so does `/blog/post` when the request sends
 `Accept: text/markdown` (set `negotiate: false` to turn that off). Paths the CMS doesn't know fall through to your app.
+When Payload runs in the same Next.js app, a path works too: `markdown: { source: '/api/geo/markdown' }` (needs
+`@garus-ltd/geo-next` 0.2.1 or later; 0.2.0 looped on its own request unless the proxy's `matcher` excluded `/api`).
 Set `llms.markdownLinks: true` in the CMS to point llms.txt entries at the `.md` URLs. To advertise the Markdown
 version, add `alternates: { types: { 'text/markdown': '/blog/post.md' } }` to the page's Next.js metadata.
 
@@ -164,6 +166,11 @@ export default async function Post({ params }: { params: Promise<{ slug: string 
   )
 }
 ```
+
+`source` must be an absolute URL, because a server component has no request URL to resolve a path against. When the
+CMS is in the same app (Payload), pass the path with `base`:
+`fetchJsonLd({ source: '/api/geo/jsonld', base: process.env.SITE_URL, path })` (0.2.1 or later). If the source can't be
+resolved, `fetchJsonLd` logs a warning and returns `null`.
 
 Configure it per collection / content type in the `llms` options:
 
