@@ -93,9 +93,38 @@ module.exports = ({ env }) => ({
 })
 ```
 
-llms.txt, Markdown and JSON-LD only include content types the **Public** role can read (`find` or `findOne` under
-Settings → Users & Permissions → Roles → Public), so they never expose what the REST API would refuse. If your
-frontend reads Strapi with an API token instead, set `llms.publicOnly: false`.
+### What Strapi serves publicly
+
+llms.txt, llms-full.txt, Markdown, JSON-LD and the dashboard's coverage all use one visibility rule, the one an
+anonymous REST request gets:
+
+- Only **published** entries (drafts and unpublished entries never appear).
+- Only content types whose `find` the **Public** role is allowed (Settings → Users & Permissions → Roles → Public).
+  `findOne` alone is not enough, because llms.txt lists entries and pages are looked up by slug.
+- Content types whose REST `find` route has custom **policies or middlewares** are skipped: the plugin can't run
+  them for an anonymous visitor. Add an `isPublic` check (below) to serve them.
+- Each entry passes through Strapi's content API output sanitizer with the Public role's permissions, so private
+  fields and relations or media the Public role can't read (an `author` relation without `author.find`, say) are dropped.
+- A page that isn't public returns the same `404 Not found` as a page that doesn't exist; lists just leave it out.
+
+For rules the Public role can't express (members-only flags, a route policy, document-level permissions from
+another plugin), add `isPublic` to the content type. It gets the sanitized entry and must return `true` to serve it;
+anything else, or a throw, hides it:
+
+```js
+'api::article.article': {
+  url: (doc) => `/blog/${doc.slug}`,
+  isPublic: (entry) => entry.visibility === 'public',
+},
+```
+
+If your frontend reads Strapi with an API token instead, set `llms.publicOnly: false` to serve every listed type
+(private fields are still dropped, and `isPublic` still applies).
+
+**Caching.** The plugin caches nothing: every request re-reads the Public role and the published entries, so
+publishing, unpublishing and permission changes apply on the next request. Responses carry
+`Cache-Control: public, max-age=300` (404s at most 60 s), so a browser or CDN in front may keep serving an
+unpublished page for that long. Set `llms.cacheMaxAge` (seconds, `0` for `no-store`), or purge the CDN on unpublish.
 
 The dashboard is under **AI Visibility** in the admin menu.
 
@@ -149,7 +178,11 @@ Set `llms.markdownLinks: true` in the CMS to point llms.txt entries at the `.md`
 version, add `alternates: { types: { 'text/markdown': '/blog/post.md' } }` to the page's Next.js metadata.
 
 Collections / content types with a `slug` field are looked up by the last path segment; others are scanned, so
-give large collections a `slug`.
+give large collections a `slug`. The whole path must match the entry's URL, so the same slug in two collections
+(`/blog/same` and `/same`) never resolves to the wrong one.
+
+In Payload, the queries run with `overrideAccess: false` and no user, so collection `read` access (including
+per-document `Where` results) decides what is public. `llms.cacheMaxAge` works the same as in Strapi.
 
 ## JSON-LD
 

@@ -6,7 +6,7 @@ export interface DocumentServiceLike {
 }
 
 export interface StrapiLike {
-  plugin(name: string): { config<T = unknown>(key: string, defaultValue?: T): T }
+  plugin(name: string): { config<T = unknown>(key: string, defaultValue?: T): T; service?(name: string): unknown }
   documents(uid: string): DocumentServiceLike
   contentType?(uid: string):
     | { info?: { pluralName?: string }; options?: { draftAndPublish?: boolean }; attributes?: Record<string, unknown> }
@@ -14,6 +14,14 @@ export interface StrapiLike {
   log: { warn(message: string): void; info(message: string): void }
   config?: { get<T = unknown>(key: string, defaultValue?: T): T }
   db?: { query(uid: string): { findOne(params: Record<string, unknown>): Promise<Record<string, any> | null> } }
+  getModel?(uid: string): unknown
+  /** Route registries, used to see how a content type's REST routes are guarded. */
+  apis?: Record<string, unknown>
+  plugins?: Record<string, unknown>
+  contentAPI?: {
+    permissions?: { engine?: { generateAbility(permissions: unknown[]): Promise<{ can(action: string): boolean }> } }
+    sanitize?: { output(data: unknown, schema: unknown, options?: { auth?: unknown }): Promise<unknown> }
+  }
 }
 
 export interface KoaContextLike {

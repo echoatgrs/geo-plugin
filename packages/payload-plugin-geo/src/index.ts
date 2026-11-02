@@ -43,10 +43,17 @@ export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsD
 
 const MAX_STATS_HITS = 100_000
 
-function text(body: string, status = 200, type = 'text/plain'): Response {
+/** `Cache-Control` for public output. Errors are cached briefly so a newly published page shows up soon. */
+export function cacheControl(maxAge: number | undefined, status: number): string {
+  const age = maxAge ?? 300
+  if (age <= 0) return 'no-store'
+  return `public, max-age=${status === 200 ? age : Math.min(age, 60)}`
+}
+
+function text(body: string, status = 200, type = 'text/plain', maxAge?: number): Response {
   return new Response(body, {
     status,
-    headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': `public, max-age=${status === 200 ? 300 : 60}` },
+    headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': cacheControl(maxAge, status) },
   })
 }
 
@@ -119,7 +126,7 @@ export const geoPlugin =
           path: full ? '/geo/llms-full.txt' : '/geo/llms.txt',
           method: 'get',
           handler: async (req) =>
-            text(renderLlms(llms, await loadLlmsDocuments(req.payload, llms, collections, config.serverURL), full)),
+            text(renderLlms(llms, await loadLlmsDocuments(req.payload, llms, collections, config.serverURL), full), 200, 'text/plain', llms.cacheMaxAge),
         })
       }
       // Per-page Markdown and JSON-LD: `?path=/blog/post` (the frontend path, without `.md`).
@@ -131,7 +138,7 @@ export const geoPlugin =
             const path = pathParam(req)
             if (!path) return text('`path` query parameter is required\n', 400)
             const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
-            return doc ? text(renderMarkdown(doc), 200, 'text/markdown') : text('Not found\n', 404)
+            return doc ? text(renderMarkdown(doc), 200, 'text/markdown', llms.cacheMaxAge) : text('Not found\n', 404, 'text/plain', llms.cacheMaxAge)
           },
         },
         {
@@ -142,9 +149,9 @@ export const geoPlugin =
             if (!path) return Response.json({ error: '`path` query parameter is required' }, { status: 400 })
             const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
             const data = doc ? renderJsonLd(llms, doc) : null
-            if (!data) return Response.json({ error: 'not found' }, { status: 404, headers: { 'cache-control': 'public, max-age=60' } })
+            if (!data) return Response.json({ error: 'not found' }, { status: 404, headers: { 'cache-control': cacheControl(llms.cacheMaxAge, 404) } })
             return new Response(JSON.stringify(data), {
-              headers: { 'content-type': 'application/ld+json; charset=utf-8', 'cache-control': 'public, max-age=300' },
+              headers: { 'content-type': 'application/ld+json; charset=utf-8', 'cache-control': cacheControl(llms.cacheMaxAge, 200) },
             })
           },
         },

@@ -5,6 +5,14 @@ export interface StrapiLlmsSource extends LlmsSourceConfig {
   filters?: Record<string, unknown>
   /** Max documents from this content type. Default 500. */
   limit?: number
+  /**
+   * Per-entry public check, for rules the Public role can't express: custom route policies, members-only
+   * flags, document-level permissions from another plugin. Runs after the Public role check and Strapi's
+   * output sanitizer, on the sanitized entry. Return `true` to serve the entry; anything else, or a throw,
+   * hides it. Required when the content type's `find` route has custom policies or middlewares, which
+   * the plugin can't evaluate on its own.
+   */
+  isPublic?: (entry: Record<string, any>, context: { uid: string; strapi: unknown }) => boolean | Promise<boolean>
 }
 
 export interface StrapiLlmsConfig {
@@ -24,11 +32,17 @@ export interface StrapiLlmsConfig {
   /** Link llms.txt entries to the `.md` version of each page. Turn on once the frontend serves them. Default false. */
   markdownLinks?: boolean
   /**
-   * Only serve content types the Users & Permissions Public role can read (`find` or `findOne`), so
+   * Only serve what an anonymous REST request could read: content types whose `find` the Public role is allowed, sanitized like the REST API, so
    * llms.txt, Markdown and JSON-LD never expose what the REST API would refuse. Default true.
    * Set false to serve every listed content type, e.g. when the site reads Strapi with an API token.
    */
   publicOnly?: boolean
+  /**
+   * Seconds browsers and CDNs may cache llms.txt, Markdown and JSON-LD (`Cache-Control: public`). Default 300.
+   * The plugin itself caches nothing, so a CDN or browser may keep serving an unpublished entry for up to
+   * this long. `0` sends `no-store`.
+   */
+  cacheMaxAge?: number
 }
 
 export interface GeoStrapiConfig {
@@ -53,6 +67,11 @@ export default {
     if (config.llms) {
       if (typeof config.llms.siteURL !== 'string' || !config.llms.siteURL) throw new Error('[geo] `llms.siteURL` is required')
       if (typeof config.llms.contentTypes !== 'object') throw new Error('[geo] `llms.contentTypes` is required')
+      const age = config.llms.cacheMaxAge
+      if (age !== undefined && !(Number.isInteger(age) && age >= 0)) throw new Error('[geo] `llms.cacheMaxAge` must be a whole number of seconds')
+      for (const [uid, source] of Object.entries(config.llms.contentTypes)) {
+        if (source?.isPublic !== undefined && typeof source.isPublic !== 'function') throw new Error(`[geo] \`isPublic\` of ${uid} must be a function`)
+      }
     }
   },
 }

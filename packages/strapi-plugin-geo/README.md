@@ -23,9 +23,10 @@ module.exports = ({ env }) => ({
 })
 ```
 
-llms.txt, Markdown and JSON-LD only include content types the **Public** role can read (`find` or `findOne` under
-Settings → Users & Permissions → Roles → Public), so they never expose what the REST API would refuse. If your
-frontend reads Strapi with an API token instead, set `llms.publicOnly: false`.
+llms.txt, Markdown and JSON-LD only serve what an anonymous REST request could read: published entries of content
+types whose `find` the **Public** role is allowed, sanitized like the REST API. Content types with custom route
+policies are skipped unless you add an `isPublic(entry)` check. If your frontend reads Strapi with an API token
+instead, set `llms.publicOnly: false`. See [What Strapi serves publicly](https://github.com/echoatgrs/geo-plugin#what-strapi-serves-publicly).
 
 Strapi can't see requests to your frontend, so add [`@garus-ltd/geo-next`](https://www.npmjs.com/package/@garus-ltd/geo-next) there:
 

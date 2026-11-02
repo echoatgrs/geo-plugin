@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { resetWarnings } from './access'
 import plugin, { CRAWLER_HIT_UID, controllers } from './index'
 import type { KoaContextLike, StrapiLike } from './types'
 
@@ -165,5 +166,161 @@ describe('strapi-plugin-geo', () => {
     const bad = ctx(undefined, '', {})
     await controllers.page({ strapi }).jsonLd(bad)
     expect(bad.status).toBe(400)
+  })
+
+  describe('public access', () => {
+    const PAGE = 'api::page.page'
+    const twoTypes = {
+      siteURL: 'https://site.test',
+      name: 'Acme',
+      contentTypes: {
+        [ARTICLE]: { section: 'Blog', url: (d: any) => `/blog/${d.slug}` },
+        [PAGE]: { section: 'Pages', url: (d: any) => `/${d.slug}` },
+      },
+    }
+    const route = (uid: string, action: string, config: Record<string, unknown> = {}) => ({
+      method: 'GET',
+      path: `/${action}`,
+      handler: `${uid}.${action}`,
+      config,
+    })
+
+    function setup(options: {
+      llms?: Record<string, any>
+      actions?: string[]
+      routes?: Record<string, unknown>[]
+      data?: Record<string, Record<string, any>[]>
+    } = {}) {
+      resetWarnings()
+      const f = fakeStrapi({ llms: options.llms ?? twoTypes }, options.data ?? {
+        [ARTICLE]: [{ title: 'Article Hello', slug: 'hello', secretNote: 'internal' }],
+        [PAGE]: [{ title: 'Page Hello', slug: 'hello' }],
+      }, options.actions ?? [`${ARTICLE}.find`, `${PAGE}.find`])
+      const base = f.strapi.contentType!
+      f.strapi.contentType = (uid) =>
+        uid === PAGE ? { info: { pluralName: 'pages' }, attributes: { slug: {} } } : uid === ARTICLE ? { info: { pluralName: 'articles' }, attributes: { slug: {} } } : base(uid)
+      f.strapi.apis = {
+        article: { routes: { article: { type: 'content-api', routes: options.routes ?? [route(ARTICLE, 'find'), route(ARTICLE, 'findOne')] } } },
+        page: { routes: { page: { type: 'content-api', routes: [route(PAGE, 'find'), route(PAGE, 'findOne')] } } },
+      }
+      const output = vi.fn(async (entry: Record<string, any>, _schema: unknown, opts: { auth?: any }) => {
+        // Like Strapi: private fields are dropped, and the auth strategy decides relations.
+        const { secretNote, ...rest } = entry
+        expect(opts.auth?.credentials).toBeNull()
+        return rest
+      })
+      f.strapi.contentAPI = { sanitize: { output } }
+      return { ...f, output }
+    }
+
+    async function outputs(strapi: StrapiLike, path: string) {
+      const llmsTxt = ctx(undefined)
+      await controllers.llms({ strapi }).llmsTxt(llmsTxt)
+      const full = ctx(undefined)
+      await controllers.llms({ strapi }).llmsFullTxt(full)
+      const md = ctx(undefined, '', { path })
+      await controllers.page({ strapi }).markdown(md)
+      const ld = ctx(undefined, '', { path })
+      await controllers.page({ strapi }).jsonLd(ld)
+      return { llmsTxt: String(llmsTxt.body), full: String(full.body), md, ld }
+    }
+
+    it('needs `find` for the Public role: findOne alone is not enough to list or look up by slug', async () => {
+      const { strapi } = setup({ actions: [`${ARTICLE}.findOne`, `${PAGE}.find`] })
+      const out = await outputs(strapi, '/blog/hello')
+      expect(out.llmsTxt).not.toContain('Article Hello')
+      expect(out.llmsTxt).not.toContain('## Blog')
+      expect(out.llmsTxt).toContain('[Page Hello](https://site.test/hello)')
+      expect(out.full).not.toContain('Article Hello')
+      expect(out.md.status).toBe(404)
+      expect(out.ld.status).toBe(404)
+      expect(out.md.body).toBe('Not found\n')
+    })
+
+    it('keeps the same slug in two content types apart', async () => {
+      const { strapi } = setup({ actions: [`${PAGE}.find`] })
+      const blog = await outputs(strapi, '/blog/hello')
+      expect(blog.md.status).toBe(404)
+      const page = await outputs(strapi, '/hello')
+      expect(page.md.status).toBe(200)
+      expect(page.md.body).toContain('# Page Hello')
+    })
+
+    it('runs entries through the content API sanitizer with the Public ability', async () => {
+      const { strapi, output } = setup()
+      const out = await outputs(strapi, '/blog/hello')
+      expect(output).toHaveBeenCalled()
+      expect(out.md.status).toBe(200)
+      expect(out.full).not.toContain('internal')
+    })
+
+    it('skips a content type whose find route has a custom policy unless isPublic decides', async () => {
+      const routes = [route(ARTICLE, 'find', { policies: ['api::article.members-only'] })]
+      const data = { [ARTICLE]: [{ title: 'Free', slug: 'free', members: false }, { title: 'Paid', slug: 'paid', members: true }], [PAGE]: [] }
+      const skipped = setup({ routes, data })
+      const out = await outputs(skipped.strapi, '/blog/free')
+      expect(out.llmsTxt).not.toContain('Free')
+      expect(out.md.status).toBe(404)
+      expect(skipped.strapi.log.warn).toHaveBeenCalledWith(expect.stringContaining('custom policies'))
+
+      const llms = { ...twoTypes, contentTypes: { ...twoTypes.contentTypes, [ARTICLE]: { ...twoTypes.contentTypes[ARTICLE], isPublic: (e: any) => e.members === false } } }
+      const decided = setup({ routes, data, llms })
+      const free = await outputs(decided.strapi, '/blog/free')
+      expect(free.llmsTxt).toContain('[Free]')
+      expect(free.llmsTxt).not.toContain('Paid')
+      expect(free.md.status).toBe(200)
+      const paid = await outputs(decided.strapi, '/blog/paid')
+      expect(paid.md.status).toBe(404)
+      expect(paid.ld.status).toBe(404)
+    })
+
+    it('hides an entry when isPublic throws', async () => {
+      const llms = { ...twoTypes, contentTypes: { [ARTICLE]: { url: (d: any) => `/blog/${d.slug}`, isPublic: () => { throw new Error('boom') } } } }
+      const { strapi } = setup({ llms })
+      const out = await outputs(strapi, '/blog/hello')
+      expect(out.llmsTxt).toBe('# Acme\n')
+      expect(out.md.status).toBe(404)
+      expect(strapi.log.warn).toHaveBeenCalledWith(expect.stringContaining('isPublic'))
+    })
+
+    it('skips a content type without a REST find route', async () => {
+      const { strapi } = setup({ routes: [route(ARTICLE, 'findOne')] })
+      const out = await outputs(strapi, '/blog/hello')
+      expect(out.llmsTxt).not.toContain('Article Hello')
+      expect(out.md.status).toBe(404)
+    })
+
+    it('serves a type whose find route is open (`auth: false`) without a Public permission', async () => {
+      const { strapi } = setup({ actions: [], routes: [route(ARTICLE, 'find', { auth: false })] })
+      const out = await outputs(strapi, '/blog/hello')
+      expect(out.llmsTxt).toContain('Article Hello')
+      expect(out.md.status).toBe(200)
+    })
+
+    it('uses the same visibility for the coverage denominator', async () => {
+      const { strapi } = setup({ actions: [`${PAGE}.find`] })
+      const c = ctx(undefined, '', { days: '7' })
+      await controllers.stats({ strapi }).stats(c)
+      expect(c.body).toMatchObject({ coverage: 0, neverCrawled: ['/hello'] })
+    })
+
+    it('honours cacheMaxAge, with no-store for 0', async () => {
+      const { strapi } = setup({ llms: { ...twoTypes, cacheMaxAge: 0 } })
+      const md = ctx(undefined, '', { path: '/blog/hello' })
+      await controllers.page({ strapi }).markdown(md)
+      expect(md.headers['Cache-Control']).toBe('no-store')
+      const other = setup({ llms: { ...twoTypes, cacheMaxAge: 30 } })
+      const missing = ctx(undefined, '', { path: '/blog/nope' })
+      await controllers.page({ strapi: other.strapi }).markdown(missing)
+      expect(missing.headers['Cache-Control']).toBe('public, max-age=30')
+      const t = ctx(undefined)
+      await controllers.llms({ strapi: other.strapi }).llmsTxt(t)
+      expect(t.headers['Cache-Control']).toBe('public, max-age=30')
+    })
+
+    it('rejects a non-function isPublic and a bad cacheMaxAge in the config', () => {
+      expect(() => plugin.config.validator({ llms: { siteURL: 'x', contentTypes: { a: { isPublic: true as any } } } })).toThrow(/isPublic/)
+      expect(() => plugin.config.validator({ llms: { siteURL: 'x', contentTypes: {}, cacheMaxAge: -1 } })).toThrow(/cacheMaxAge/)
+    })
   })
 })

@@ -37,6 +37,11 @@ export interface LlmsOptions {
   mediaURL?: string
   /** Link llms.txt entries to the `.md` version of each page. Turn on once the frontend serves them. Default false. */
   markdownLinks?: boolean
+  /**
+   * Seconds browsers and CDNs may cache llms.txt, Markdown and JSON-LD (`Cache-Control: public`). Default 300.
+   * The plugin itself caches nothing; a CDN may keep serving an unpublished page for up to this long. `0` sends `no-store`.
+   */
+  cacheMaxAge?: number
 }
 
 /** Whether a collection has a top-level `slug` field (rows, collapsibles and unnamed tabs count as top level). */

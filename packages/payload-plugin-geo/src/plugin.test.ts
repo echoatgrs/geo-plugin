@@ -133,4 +133,19 @@ describe('geoPlugin', () => {
     expect(res.status).toBe(200)
     expect(await res.text()).toContain('[Hello](https://site.test/blog/hello)')
   })
+
+  it('honours llms.cacheMaxAge on public output', async () => {
+    const make = (cacheMaxAge: number) =>
+      geoPlugin({ verifyIPs: false, llms: { siteURL: 'https://site.test', cacheMaxAge, collections: { posts: { url: (d) => `/blog/${d.slug}` } } } })(base)
+    const noStore = make(0)
+    const md = await noStore.endpoints!.find((e) => e.path === '/geo/markdown')!.handler(fakeRequest({ url: 'http://cms.test/api/geo/markdown?path=/blog/hello' }).req as never)
+    expect(md.headers.get('cache-control')).toBe('no-store')
+    const short = make(30)
+    const missing = await short.endpoints!.find((e) => e.path === '/geo/jsonld')!.handler(fakeRequest({ url: 'http://cms.test/api/geo/jsonld?path=/nope' }).req as never)
+    expect(missing.headers.get('cache-control')).toBe('public, max-age=30')
+    const txt = await short.endpoints!.find((e) => e.path === '/geo/llms.txt')!.handler(fakeRequest({}).req as never)
+    expect(txt.headers.get('cache-control')).toBe('public, max-age=30')
+    const dflt = await endpoint('/geo/markdown').handler(fakeRequest({ url: 'http://cms.test/api/geo/markdown?path=/nope' }).req as never)
+    expect(dflt.headers.get('cache-control')).toBe('public, max-age=60')
+  })
 })
