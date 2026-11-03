@@ -6,7 +6,8 @@
  * plugin's rule passed.
  */
 import { buildJsonLd, serializeJsonLd, type JsonLd, type JsonLdSite } from './jsonld.js'
-import { documentMarkdown, getField, mapLlmsDocument, sourceFields, type LlmsDocument, type LlmsMappingOptions, type LlmsMappingSources } from './llms.js'
+import type { ConversionWarning } from './convert.js'
+import { documentMarkdown, getField, mapLlmsDocument, sourceFields, type FieldOrigin, type LlmsDocument, type LlmsMappingOptions, type LlmsMappingSources } from './llms.js'
 
 export type CheckStatus = 'pass' | 'warning' | 'error' | 'notApplicable'
 
@@ -55,7 +56,9 @@ export interface InspectOptions extends LlmsMappingOptions {
 
 /** Where a value in the output came from. */
 export interface FieldDiagnostic {
-  property: 'url' | 'title' | 'description' | 'content' | 'author' | 'image' | 'datePublished' | 'dateModified' | 'faq'
+  property: 'url' | 'title' | 'description' | 'content' | 'author' | 'image' | 'datePublished' | 'dateModified' | 'canonical' | 'faq'
+  /** Whether the field came from the GEO config, the SEO fields or a default name. */
+  origin?: FieldOrigin
   /** Field path the value was read from, or null when none was found. */
   field: string | null
   /** The value in the output, shortened. */
@@ -74,6 +77,12 @@ export interface Inspection {
   jsonLdScript: string | null
   validation: CheckResult[]
   diagnostics: FieldDiagnostic[]
+  /** Which field each value came from. */
+  sources: LlmsMappingSources
+  /** Converted body, also for a document without URL. */
+  contentMarkdown: string
+  /** Content converter warnings (unknown blocks, unavailable relations, limits). */
+  conversion: { warnings: ConversionWarning[]; truncated: boolean }
 }
 
 const r = (ruleId: string, status: CheckStatus, message: string, suggestion: string, fieldPath?: string): CheckResult =>
@@ -108,8 +117,28 @@ function hasValue(v: unknown): boolean {
   return true
 }
 
+function conversionRule(warnings: ConversionWarning[], truncated: boolean, hasBody: boolean): CheckResult {
+  if (!hasBody) return r('GEO-CONVERSION', 'notApplicable', 'No body to convert.', 'Nothing to do.')
+  if (!warnings.length) return r('GEO-CONVERSION', 'pass', 'All blocks and nodes converted.', 'Nothing to do.')
+  const serious = warnings.filter((w) => w.code !== 'unknown-node')
+  const list = warnings
+    .slice(0, 5)
+    .map((w) => `${w.code}${w.type ? ` "${w.type}"` : ''} at ${w.path || '(root)'}${w.count > 1 ? ` (×${w.count})` : ''}`)
+    .join('; ')
+  const first = warnings[0]!
+  return r(
+    'GEO-CONVERSION',
+    truncated || serious.some((w) => w.code === 'converter-error') ? 'error' : 'warning',
+    `${truncated ? 'Content was cut by a conversion limit. ' : ''}${warnings.length} conversion warning${warnings.length > 1 ? 's' : ''}: ${list}${warnings.length > 5 ? '; …' : ''}`,
+    first.message,
+    first.path || undefined,
+  )
+}
+
 function fieldRule(options: InspectOptions): CheckResult {
   const { source, knownFields } = options
+  const specPaths = (name: string, spec: unknown): Array<[string, string]> =>
+    (Array.isArray(spec) ? spec : [spec]).filter((e): e is string => typeof e === 'string').map((p) => [name, p])
   const candidates: Array<[string, string | undefined]> = [
     ['titleField', source.titleField],
     ['descriptionField', source.descriptionField],
@@ -119,6 +148,9 @@ function fieldRule(options: InspectOptions): CheckResult {
     ['publishedField', source.publishedField],
     ['faqField', source.faqField],
     ['sourcesField', options.sourcesField],
+    ...(source.contentFields ?? []).map((p): [string, string] => ['contentFields', p]),
+    ...Object.entries(source.fields ?? {}).flatMap(([k, spec]) => specPaths(`fields.${k}`, spec)),
+    ...Object.entries(source.seo ?? {}).flatMap(([k, spec]) => specPaths(`seo.${k}`, spec)),
   ]
   const configured = candidates.filter((entry): entry is [string, string] => typeof entry[1] === 'string')
   if (!knownFields) {
@@ -168,10 +200,10 @@ export function inspectDocument(doc: Record<string, any>, options: InspectOption
 
   // Body
   const raw = mapping.rawContent
-  const markdownBody = options.markdown(raw)
+  const markdownBody = mapping.markdown
   if (!hasValue(raw)) checks.push(r('GEO-BODY', 'error', 'Body is empty.', `Write the content in \`${fields.content[0]}\`. llms-full.txt and the Markdown page are empty without it.`, fields.content[0]))
   else if (!markdownBody.trim())
-    checks.push(r('GEO-BODY', 'error', 'Body has content but converts to empty Markdown.', 'Use Lexical, Strapi Blocks or Markdown text, or set `contentField` to the rich text field.', sources.content ?? undefined))
+    checks.push(r('GEO-BODY', 'error', 'Body has content but converts to empty Markdown.', mapping.conversion.warnings.length ? 'See GEO-CONVERSION: register converters for the blocks listed there.' : 'Use Lexical, Strapi Blocks or Markdown text, or set `contentField` to the rich text field.', sources.content ?? undefined))
   else checks.push(r('GEO-BODY', 'pass', `Body converts to ${markdownBody.length} characters of Markdown.`, 'Nothing to do.', sources.content ?? undefined))
 
   // Subheadings (suggestion only)
@@ -221,6 +253,21 @@ export function inspectDocument(doc: Record<string, any>, options: InspectOption
     )
   }
 
+  // Content conversion: unknown blocks, unavailable relations, limits
+  checks.push(conversionRule(mapping.conversion.warnings, mapping.conversion.truncated, hasValue(raw)))
+
+  // Canonical URL from GEO / SEO fields
+  if (!sources.canonical) checks.push(r('GEO-CANONICAL', 'notApplicable', 'No canonical field mapped or filled; the frontend URL is used.', 'Optional: map `fields.canonical` or `seo.canonical`.'))
+  else if (!document?.canonical || !isHttpURL(document.canonical))
+    checks.push(r('GEO-CANONICAL', 'error', `Canonical "${String(getField(doc, sources.canonical) ?? '')}" is not an http(s) URL or path.`, 'Fix the canonical field.', sources.canonical))
+  else if (document.canonical.replace(/\/+$/, '') !== document.url.replace(/\/+$/, ''))
+    checks.push(r('GEO-CANONICAL', 'warning', `Canonical ${document.canonical} differs from the frontend URL ${document.url}. JSON-LD uses the canonical; llms.txt and Markdown keep the frontend URL.`, 'Check that this is intended (e.g. syndicated content).', sources.canonical))
+  else checks.push(r('GEO-CANONICAL', 'pass', 'Canonical matches the frontend URL.', 'Nothing to do.', sources.canonical))
+
+  // Field resolvers that threw
+  for (const [prop, message] of Object.entries(mapping.fieldErrors ?? {}))
+    checks.push(r(`GEO-FIELDS-${prop.toUpperCase()}`, 'error', `Field resolver for ${prop} threw: ${String(message).slice(0, 200)}`, 'Fix the resolver function in `fields`.'))
+
   // Field mapping
   checks.push(fieldRule(options))
 
@@ -259,6 +306,9 @@ export function inspectDocument(doc: Record<string, any>, options: InspectOption
     jsonLdScript,
     validation: validateJsonLd(jsonLd, document, options.source.jsonLd === false),
     diagnostics: diagnose(document, sources, options),
+    sources,
+    contentMarkdown: mapping.markdown,
+    conversion: mapping.conversion,
   }
 }
 
@@ -273,8 +323,16 @@ function diagnose(document: LlmsDocument | null, sources: LlmsMappingSources, op
     { property: 'image', field: sources.image, value: d?.image ?? null, fallback: d?.image ? undefined : 'none' },
     { property: 'datePublished', field: sources.published, value: d?.publishedAt ?? null, fallback: sources.published ? undefined : 'left out' },
     { property: 'dateModified', field: sources.updated, value: d?.updatedAt ?? null, fallback: sources.updated ? undefined : 'datePublished, when set' },
+    { property: 'canonical', field: sources.canonical, value: d?.canonical ?? null, fallback: sources.canonical ? undefined : 'the frontend URL' },
     { property: 'faq', field: sources.faq, value: d?.faq?.length ? `${d.faq.length} items` : null, fallback: sources.faq ? undefined : 'no FAQPage' },
-  ].map((x) => (x.fallback === undefined ? { property: x.property, field: x.field, value: x.value } : x)) as FieldDiagnostic[]
+  ].map((x) => {
+    const key = ({ datePublished: 'published', dateModified: 'updated' } as Record<string, string>)[x.property] ?? x.property
+    const origin = sources.origins?.[key as keyof LlmsMappingSources['origins']]
+    const base: FieldDiagnostic = { property: x.property as FieldDiagnostic['property'], field: x.field, value: x.value }
+    if (origin && x.field) base.origin = origin
+    if (x.fallback !== undefined) base.fallback = x.fallback
+    return base
+  })
 }
 
 const ARTICLE_TYPES = new Set(['Article', 'BlogPosting', 'NewsArticle', 'TechArticle', 'ScholarlyArticle', 'Report'])

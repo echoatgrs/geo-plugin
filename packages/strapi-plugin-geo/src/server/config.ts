@@ -1,4 +1,4 @@
-import type { CheckThresholds, LlmsSourceConfig } from '@garus-ltd/geo-core'
+import { createContentConverter, defineRules, type BotDefinition, type CheckThresholds, type ContentConverterOptions, type GeoRule, type LlmsSourceConfig } from '@garus-ltd/geo-core'
 import type { StrapiCitationConfig, StrapiReferralConfig } from './evidence'
 
 export interface StrapiLlmsSource extends LlmsSourceConfig {
@@ -6,6 +6,16 @@ export interface StrapiLlmsSource extends LlmsSourceConfig {
   filters?: Record<string, unknown>
   /** Max documents from this content type. Default 500. */
   limit?: number
+  /**
+   * Document Service `populate` for this content type. Default: built from the schema (media, components and
+   * dynamic zones at any depth up to `populateDepth`, relations one level). The output sanitizer still drops
+   * whatever the Public role can't read.
+   */
+  populate?: unknown
+  /** Component / dynamic zone nesting the default populate follows. Default 5. */
+  populateDepth?: number
+  /** Block / component converters for this content type, merged over `llms.converters`. */
+  converters?: ContentConverterOptions
   /**
    * Per-entry public check, for rules the Public role can't express: custom route policies, members-only
    * flags, document-level permissions from another plugin. Runs after the Public role check and Strapi's
@@ -50,6 +60,15 @@ export interface StrapiLlmsConfig {
   editorPanel?: boolean
   /** Other hosts of the same site (e.g. `www.example.com`), counted with `siteURL`'s host in per-page visits. */
   hosts?: string[]
+  /**
+   * Converters for your components (by UID, e.g. `shared.hero`, or the part after the dot) and Blocks nodes, used
+   * by Markdown, llms-full.txt and the editor preview alike. Built-in ones cover the Strapi blog template components.
+   */
+  converters?: ContentConverterOptions
+  /** Custom editor panel checks, run after the built-in ones. Validated at startup (see `defineRules`). */
+  rules?: GeoRule<any>[]
+  /** Time limit per async custom rule. Default 2000 ms. */
+  rulesTimeoutMs?: number
 }
 
 export interface GeoStrapiConfig {
@@ -61,6 +80,8 @@ export interface GeoStrapiConfig {
   storeSpoofed: boolean
   /** Stop accepting hits without removing the content type. */
   enabled: boolean
+  /** Bot list used to classify reported hits (e.g. from `defineBots`). Default: the built-in list. */
+  bots?: readonly BotDefinition[]
   /** Serve `/api/geo/llms.txt` and `/api/geo/llms-full.txt`. */
   llms: StrapiLlmsConfig | null
   /** Setup status view: connectivity test limits. */
@@ -89,7 +110,9 @@ export default {
       if (age !== undefined && !(Number.isInteger(age) && age >= 0)) throw new Error('[geo] `llms.cacheMaxAge` must be a whole number of seconds')
       for (const [uid, source] of Object.entries(config.llms.contentTypes)) {
         if (source?.isPublic !== undefined && typeof source.isPublic !== 'function') throw new Error(`[geo] \`isPublic\` of ${uid} must be a function`)
+        createContentConverter({ ...config.llms.converters, ...source?.converters })
       }
+      if (config.llms.rules) defineRules(config.llms.rules)
     }
   },
 }

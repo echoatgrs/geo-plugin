@@ -5,7 +5,6 @@ import {
   evidenceChecks,
   manualSteps,
   mapLlmsDocument,
-  richTextToMarkdown,
   runActiveChecks,
   summarizeDocumentHits,
   type DocumentHit,
@@ -14,6 +13,7 @@ import {
   type SetupFacts,
 } from '@garus-ltd/geo-core'
 import { publicAccess } from './access'
+import { mappingOptions, populateOf } from './content'
 import type { GeoStrapiConfig } from './config'
 import type { KoaContextLike, StrapiLike } from './types'
 
@@ -39,12 +39,11 @@ async function facts(strapi: StrapiLike, cfg: GeoStrapiConfig, state: SetupState
         sources.push({ name: uid, exists: true, publicDocuments: 0, note: 'the Public role can’t `find` it, or its route has policies without `isPublic`' })
         continue
       }
-      const name = strapi.contentType?.(uid)?.info?.pluralName ?? uid
-      const entries = await strapi.documents(uid).findMany({ status: 'published', filters: source.filters, populate: '*', limit: source.limit ?? 500 })
+      const entries = await strapi.documents(uid).findMany({ status: 'published', filters: source.filters, populate: populateOf(strapi, uid, source), limit: source.limit ?? 500 })
       let count = 0
       for (const entry of entries) {
         const visible = await access.filter(uid, source, entry)
-        const doc = visible && mapLlmsDocument(visible, { name, siteURL: llms.siteURL, source, markdown: richTextToMarkdown }).document
+        const doc = visible && mapLlmsDocument(visible, mappingOptions(strapi, llms, uid, source)).document
         if (!doc) continue
         count++
         sample ??= { url: doc.url, title: doc.title }
@@ -134,8 +133,7 @@ export async function documentStats(strapi: StrapiLike, cfg: GeoStrapiConfig, hi
     ctx.body = { error: 'not found' }
     return
   }
-  const name = strapi.contentType?.(uid)?.info?.pluralName ?? uid
-  const doc = mapLlmsDocument(entry, { name, siteURL: llms.siteURL, source, markdown: richTextToMarkdown }).document
+  const doc = mapLlmsDocument(entry, mappingOptions(strapi, llms, uid, source)).document
   if (!doc) {
     ctx.status = 200
     ctx.body = { unavailable: 'This entry has no frontend URL yet.' }

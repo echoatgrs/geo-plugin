@@ -2,10 +2,11 @@ import {
   externalValidators,
   inspectDocument,
   mapLlmsDocument,
-  richTextToMarkdown,
+  withRules,
   type Inspection,
 } from '@garus-ltd/geo-core'
 import { publicAccess } from './access'
+import { mappingOptions, populateOf } from './content'
 import type { StrapiLlmsConfig } from './config'
 import type { StrapiLike } from './types'
 
@@ -82,10 +83,10 @@ export async function inspectStrapiEntry(
   const docs = strapi.documents(uid)
   let stored: Record<string, any> = {}
   if (documentId) {
-    stored = (await docs.findOne?.({ documentId, status: 'draft', populate: '*' })) ?? {}
+    stored = (await docs.findOne?.({ documentId, status: 'draft', populate: populateOf(strapi, uid, source) })) ?? {}
     if (!Object.keys(stored).length) return { status: 404, body: { error: 'not found' } }
   }
-  const live = documentId && draftAndPublish ? await docs.findOne?.({ documentId, status: 'published', populate: '*' }) : documentId ? stored : null
+  const live = documentId && draftAndPublish ? await docs.findOne?.({ documentId, status: 'published', populate: populateOf(strapi, uid, source) }) : documentId ? stored : null
   const version = body.version === 'published' ? 'published' : 'current'
   if (version === 'published' && !live) return { status: 404, body: { error: 'no published version' } }
   const access = await publicAccess(strapi, llms)
@@ -108,8 +109,7 @@ export async function inspectStrapiEntry(
       const visible = await access.filter(uid, source, live)
       if (!visible) publicReason = '`isPublic` hides it'
       else {
-        const name = strapi.contentType?.(uid)?.info?.pluralName ?? uid.split('.').pop() ?? uid
-        const doc = mapLlmsDocument(visible, { name, siteURL: llms.siteURL, source, markdown: richTextToMarkdown }).document
+        const doc = mapLlmsDocument(visible, mappingOptions(strapi, llms, uid, source)).document
         publicVisible = !!doc
         publicURL = doc?.url ?? null
         if (!doc) publicReason = 'no frontend URL'
@@ -117,20 +117,17 @@ export async function inspectStrapiEntry(
     }
   }
 
-  const name = strapi.contentType?.(uid)?.info?.pluralName ?? uid.split('.').pop() ?? uid
   const attributes = Object.keys(strapi.contentType?.(uid)?.attributes ?? {})
-  const inspection = inspectDocument(previewValues, {
-    name,
-    siteURL: llms.siteURL,
-    source,
-    markdown: richTextToMarkdown,
-    mediaURL: llms.mediaURL ?? (strapi.config?.get<string>('server.url', '') || undefined),
+  const state = { saved: !!documentId, published, publicVisible, publicReason }
+  const builtin = inspectDocument(previewValues, {
+    ...mappingOptions(strapi, llms, uid, source),
     site: { name: llms.name ?? llms.siteURL, url: llms.siteURL, logo: llms.logo, language: llms.language },
     sourcesField: source.sourcesField,
     knownFields: [...attributes, 'id', 'documentId', 'createdAt', 'updatedAt', 'publishedAt'],
     thresholds: llms.checks,
-    state: { saved: !!documentId, published, publicVisible, publicReason },
+    state,
   })
+  const inspection = await withRules(builtin, llms.rules, { values: previewValues, state, collection: uid }, { timeoutMs: llms.rulesTimeoutMs })
 
   const result: StrapiInspection = { ...inspection }
   if (publicURL) {

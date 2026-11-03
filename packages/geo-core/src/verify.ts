@@ -15,6 +15,8 @@ export interface IPVerifierOptions {
   fetch?: typeof fetch
   /** Override or add ranges per bot id, e.g. for bots with no public list. */
   staticRanges?: Record<string, string[]>
+  /** Time limit of a bot's own `verify()` function. Default 2000 ms. */
+  verifyTimeoutMs?: number
 }
 
 export interface IPVerifier {
@@ -78,10 +80,32 @@ export function createIPVerifier(options: IPVerifierOptions = {}): IPVerifier {
     ]),
   )
 
+  const botRanges = new WeakMap<BotDefinition, CIDR[]>()
+  const rangesOf = (bot: BotDefinition) => {
+    if (!bot.ipRanges?.length) return null
+    let list = botRanges.get(bot)
+    if (!list) botRanges.set(bot, (list = bot.ipRanges.map(parseCIDR).filter((c): c is CIDR => c !== null)))
+    return list
+  }
+
   return {
     async verify(bot, ip) {
       if (!ip) return 'unverifiable'
-      const ranges = staticRanges.get(bot.id) ?? (bot.ipRangesUrl ? await load(bot.ipRangesUrl) : null)
+      if (bot.verify) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          const result = await Promise.race([
+            Promise.resolve().then(() => bot.verify!(ip, bot)),
+            new Promise<'unverifiable'>((r) => (timer = setTimeout(() => r('unverifiable'), options.verifyTimeoutMs ?? 2000))),
+          ])
+          return result === 'verified' || result === 'spoofed' ? result : 'unverifiable'
+        } catch {
+          return 'unverifiable'
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+      const ranges = staticRanges.get(bot.id) ?? rangesOf(bot) ?? (bot.ipRangesUrl ? await load(bot.ipRangesUrl) : null)
       if (!ranges) return 'unverifiable'
       return ipInRanges(ip, ranges) ? 'verified' : 'spoofed'
     },

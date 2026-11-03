@@ -1,4 +1,4 @@
-export { AI_BOTS, detectBot, type BotDefinition, type BotPurpose } from './bots.js'
+export { AI_BOTS, defineBots, detectBot, type BotDefinition, type BotPurpose, type DefineBotsOptions } from './bots.js'
 export { ipInRanges, parseCIDR, parseIP, type CIDR } from './cidr.js'
 export { createIPVerifier, parseRangeList, type IPVerifier, type IPVerifierOptions, type Verification } from './verify.js'
 export {
@@ -12,16 +12,54 @@ export {
 } from './ingest.js'
 export { lexicalToMarkdown, richTextToMarkdown, strapiBlocksToMarkdown } from './markdown.js'
 export {
+  BUILTIN_BLOCKS,
+  blockTypeOf,
+  createContentConverter,
+  defaultConverter,
+  markdownTable,
+  mergeConverterOptions,
+  type BlockConverter,
+  type ContentConverter,
+  type ContentConverterOptions,
+  type ConversionLimits,
+  type ConversionResult,
+  type ConversionWarning,
+  type ConversionWarningCode,
+  type ConvertContext,
+  type ConvertOptions,
+} from './convert.js'
+export {
+  BUILTIN_RULE_IDS,
+  defineRules,
+  normalizeOutcome,
+  runRules,
+  withRules,
+  type GeoRule,
+  type RuleContext,
+  type RuleOutcome,
+  type RuleRunOptions,
+} from './rules.js'
+export {
   buildLlmsFullTxt,
   buildLlmsTxt,
+  PAYLOAD_SEO_PLUGIN,
+  authorName,
   documentMarkdown,
+  documentURL,
+  fieldCandidates,
   getField,
+  imageURL,
   joinURL,
   mapLlmsDocument,
   markdownSourcePath,
   markdownURL,
   sourceFields,
   toLlmsDocument,
+  type FieldOrigin,
+  type FieldResolver,
+  type FieldSpec,
+  type MappedProperty,
+  type SeoFieldMap,
   type LlmsMapping,
   type LlmsMappingOptions,
   type LlmsMappingSources,

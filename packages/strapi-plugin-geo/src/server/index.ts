@@ -11,7 +11,6 @@ import {
   findDocumentByPath,
   ingestHits,
   lastSegment,
-  richTextToMarkdown,
   summarizeHits,
   toLlmsDocument,
   windowStart,
@@ -20,6 +19,7 @@ import {
   type StatsHit,
 } from '@garus-ltd/geo-core'
 import { publicAccess, type PublicAccess } from './access'
+import { mappingOptions, populateOf } from './content'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
 import { AI_REFERRAL_UID, CITATION_UID, citationMiddleware, evidenceReport, ingestReferralReport } from './evidence'
 import { inspectStrapiEntry } from './inspect'
@@ -46,6 +46,7 @@ function getConfig(strapi: StrapiLike): GeoStrapiConfig {
     verifyIPs: plugin.config('verifyIPs', true),
     storeSpoofed: plugin.config('storeSpoofed', true),
     enabled: plugin.config('enabled', true),
+    bots: plugin.config('bots', undefined),
     llms: plugin.config('llms', null),
     diagnostics: plugin.config('diagnostics', {}),
     referrals: plugin.config('referrals', {}),
@@ -68,18 +69,16 @@ async function findEntries(strapi: StrapiLike, uid: string, source: StrapiLlmsSo
     // Only published entries for draft & publish content types; ignored otherwise.
     status: 'published',
     filters,
-    // Relations and media (author, cover image, FAQ components) for JSON-LD.
-    populate: '*',
+    // Media, components, dynamic zones and relations (author, cover image, FAQ) from the schema.
+    populate: populateOf(strapi, uid, source) as never,
     limit: source.limit ?? 500,
     sort: 'updatedAt:desc',
   })
 }
 
 function mapper(strapi: StrapiLike, llms: StrapiLlmsConfig, uid: string, source: StrapiLlmsSource) {
-  const name = strapi.contentType?.(uid)?.info?.pluralName ?? uid.split('.').pop() ?? uid
-  const mediaURL = llms.mediaURL ?? (strapi.config?.get<string>('server.url', '') || undefined)
-  return (entry: Record<string, any>) =>
-    toLlmsDocument(entry, { name, siteURL: llms.siteURL, source, markdown: richTextToMarkdown, mediaURL })
+  const options = mappingOptions(strapi, llms, uid, source)
+  return (entry: Record<string, any>) => toLlmsDocument(entry, options)
 }
 
 /** Published entries of one content type that the public may read, as llms documents. */
@@ -184,6 +183,7 @@ export const controllers = {
         secret: cfg.secret || undefined,
         verifier: cfg.verifyIPs ? (verifier ??= createIPVerifier()) : undefined,
         storeSpoofed: cfg.storeSpoofed,
+        bots: cfg.bots,
         probes: setupState.probes,
         log: setupState.log,
         store: {

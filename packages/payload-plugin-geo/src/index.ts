@@ -7,6 +7,7 @@ import {
   ingestHits,
   summarizeHits,
   windowStart,
+  type BotDefinition,
   type HitStore,
   type IPVerifierOptions,
   type StatsHit,
@@ -28,6 +29,7 @@ import { documentStats, runSetupTest, setupReport, type DiagnosticsOptions, type
 import {
   loadDocumentByPath,
   loadLlmsDocuments,
+  validateLlmsOptions,
   renderJsonLd,
   renderLlms,
   renderMarkdown,
@@ -42,6 +44,11 @@ export interface GeoPluginOptions {
   verifyIPs?: boolean | IPVerifierOptions
   /** Store hits whose IP does not match the claimed bot. Default true. */
   storeSpoofed?: boolean
+  /**
+   * Bot list used to classify reported hits. Default: the built-in list. Use `defineBots([...])` to add your own,
+   * and pass the same list to withGeo({ bots }) in the frontend.
+   */
+  bots?: readonly BotDefinition[]
   /** Path of the ingest endpoint under the Payload API route. Default `/geo/ingest`. */
   ingestPath?: string
   /** Customize the generated collection (labels, access, admin, ...). */
@@ -98,6 +105,7 @@ function pathParam(req: { url?: string }): string | null {
 export const geoPlugin =
   (options: GeoPluginOptions = {}): Plugin =>
   (config: Config): Config => {
+    if (options.llms) validateLlmsOptions(options.llms)
     const verifyIPs = options.verifyIPs ?? true
     const verifier = verifyIPs ? createIPVerifier(verifyIPs === true ? {} : verifyIPs) : undefined
     const probes = new ProbeRegistry()
@@ -170,6 +178,7 @@ export const geoPlugin =
           secret: options.secret,
           verifier,
           storeSpoofed: options.storeSpoofed,
+          bots: options.bots,
           store,
           probes,
           log: ingestLog,

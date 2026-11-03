@@ -39,7 +39,7 @@ describe('inspectDocument', () => {
     expect(res.jsonLdScript).not.toContain('</script')
     expect(res.markdown).toContain('正文')
     expect(res.validation.every((v) => v.status === 'pass' || v.status === 'notApplicable')).toBe(true)
-    expect(res.diagnostics.find((d) => d.property === 'image')).toEqual({ property: 'image', field: 'cover', value: 'https://cms.test/uploads/a.png' })
+    expect(res.diagnostics.find((d) => d.property === 'image')).toEqual({ property: 'image', field: 'cover', value: 'https://cms.test/uploads/a.png', origin: 'config' })
     for (const c of res.checks) expect(Object.keys(c)).toEqual(expect.arrayContaining(['ruleId', 'status', 'message', 'suggestion']))
   })
 

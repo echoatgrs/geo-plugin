@@ -1,13 +1,19 @@
 import {
+  createContentConverter,
+  defineRules,
+  documentURL,
+  mergeConverterOptions,
   buildJsonLd,
   buildLlmsFullTxt,
   buildLlmsTxt,
   documentMarkdown,
   findDocumentByPath,
   lastSegment,
-  richTextToMarkdown,
   toLlmsDocument,
   type CheckThresholds,
+  type ContentConverter,
+  type ContentConverterOptions,
+  type GeoRule,
   type JsonLd,
   type LlmsDocument,
   type LlmsSourceConfig,
@@ -19,6 +25,13 @@ export interface PayloadLlmsSource extends LlmsSourceConfig {
   where?: Where
   /** Max documents from this collection. Default 500. */
   limit?: number
+  /**
+   * How deep Payload populates relationships and uploads (also inside blocks and Lexical). Default 1.
+   * Population runs with the anonymous visitor's access, so related documents the public can't read stay ids.
+   */
+  depth?: number
+  /** Block / node converters for this collection, merged over `llms.converters`. */
+  converters?: ContentConverterOptions
 }
 
 export interface LlmsOptions {
@@ -47,6 +60,40 @@ export interface LlmsOptions {
   checks?: CheckThresholds
   /** Other hosts of the same site (e.g. `www.example.com`), counted with `siteURL`'s host in per-page visits. */
   hosts?: string[]
+  /**
+   * Converters for your own blocks and Lexical nodes, used by Markdown, llms-full.txt and the editor preview alike.
+   * Built-in ones cover the Payload website template blocks; see the README for the list.
+   */
+  converters?: ContentConverterOptions
+  /** Custom editor panel checks, run after the built-in ones. Validated at startup (see `defineRules`). */
+  rules?: GeoRule<any>[]
+  /** Time limit per async custom rule. Default 2000 ms. */
+  rulesTimeoutMs?: number
+}
+
+const converterCache = new WeakMap<object, { global: unknown; converter: ContentConverter }>()
+
+/** The converter of a collection: built-ins, then `llms.converters`, then the collection's own. Cached. */
+export function converterFor(options: LlmsOptions, source: PayloadLlmsSource): ContentConverter {
+  const cached = converterCache.get(source)
+  if (cached && cached.global === options.converters) return cached.converter
+  const converter = createContentConverter(mergeConverterOptions(options.converters, source.converters))
+  converterCache.set(source, { global: options.converters, converter })
+  return converter
+}
+
+/** Validates the llms options once at startup: rules and converters fail fast with a clear message. */
+export function validateLlmsOptions(options: LlmsOptions) {
+  if (options.rules) defineRules(options.rules)
+  for (const source of Object.values(options.collections)) converterFor(options, source)
+}
+
+/** Links between documents: a related document of a configured collection gets its public URL. */
+export function linkResolver(options: LlmsOptions) {
+  return (doc: Record<string, any>, relationTo?: string) => {
+    const source = relationTo && Object.prototype.hasOwnProperty.call(options.collections, relationTo) ? options.collections[relationTo] : undefined
+    return source ? documentURL(doc, relationTo!, source, options.siteURL) : null
+  }
 }
 
 /** Whether a collection has a top-level `slug` field (rows, collapsibles and unnamed tabs count as top level). */
@@ -75,7 +122,7 @@ export async function queryCollection(
       collection: slug as never,
       where: filters.length ? { and: filters } : undefined,
       limit: source.limit ?? 500,
-      depth: 1,
+      depth: source.depth ?? 1,
       // Anonymous read: only content the public can already see is served.
       overrideAccess: false,
       sort: '-updatedAt',
@@ -93,7 +140,8 @@ export function mapDoc(doc: Record<string, any>, slug: string, source: PayloadLl
     name: slug,
     siteURL: options.siteURL,
     source,
-    markdown: richTextToMarkdown,
+    converter: converterFor(options, source),
+    linkFor: linkResolver(options),
     mediaURL: options.mediaURL ?? mediaURL,
   })
 }
