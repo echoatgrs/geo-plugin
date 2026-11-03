@@ -4,6 +4,7 @@ import {
   documentURL,
   mergeConverterOptions,
   buildJsonLd,
+  omitJsonLdTypes,
   buildLlmsFullTxt,
   buildLlmsTxt,
   documentMarkdown,
@@ -15,6 +16,8 @@ import {
   type ContentConverterOptions,
   type GeoRule,
   type JsonLd,
+  type JsonLdSite,
+  type OrganizationConfig,
   type LlmsDocument,
   type LlmsSourceConfig,
 } from '@garus-ltd/geo-core'
@@ -45,6 +48,17 @@ export interface LlmsOptions {
   collections: Record<string, PayloadLlmsSource>
   /** Logo for the JSON-LD publisher, absolute or a path on the site. */
   logo?: string
+  /**
+   * The site organization as a JSON-LD node with a stable `@id`, used as publisher (and author fallback) of every
+   * article. Without it the publisher is an inline Organization named after the site, as before.
+   */
+  organization?: OrganizationConfig
+  /**
+   * JSON-LD types the host site already outputs itself (e.g. `['Article', 'Organization']` when an SEO plugin
+   * renders them). The frontend gets the graph without them with `fetchJsonLd({ omit: 'host' })`; the endpoint
+   * without `omit` still returns everything. Used by the setup check for duplicate nodes.
+   */
+  hostManaged?: string[]
   /** Content language for JSON-LD, e.g. `en`. */
   language?: string
   /** Base for relative upload URLs. Default: Payload `serverURL`, else `siteURL`. */
@@ -208,9 +222,11 @@ export function renderMarkdown(doc: LlmsDocument): string {
   return documentMarkdown(doc)
 }
 
-export function renderJsonLd(options: LlmsOptions, doc: LlmsDocument): JsonLd | null {
-  return buildJsonLd(
-    { name: options.name ?? options.siteURL, url: options.siteURL, logo: options.logo, language: options.language },
-    doc,
-  )
+export function jsonLdSite(options: LlmsOptions): JsonLdSite {
+  return { name: options.name ?? options.siteURL, url: options.siteURL, logo: options.logo, language: options.language, organization: options.organization }
+}
+
+export function renderJsonLd(options: LlmsOptions, doc: LlmsDocument, omit: string[] = []): JsonLd | null {
+  const data = buildJsonLd(jsonLdSite(options), doc)
+  return data && omit.length ? omitJsonLdTypes(data, omit) : data
 }

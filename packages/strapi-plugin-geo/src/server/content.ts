@@ -3,6 +3,7 @@ import {
   documentURL,
   mergeConverterOptions,
   type ContentConverter,
+  type JsonLdSite,
   type LlmsMappingOptions,
 } from '@garus-ltd/geo-core'
 import type { StrapiLlmsConfig, StrapiLlmsSource } from './config'
@@ -93,6 +94,10 @@ export function mappingOptions(strapi: StrapiLike, llms: StrapiLlmsConfig, uid: 
       return target ? documentURL(doc, pluralName(strapi, relationTo!), target, llms.siteURL) : null
     },
   }
+}
+
+export function jsonLdSite(llms: StrapiLlmsConfig): JsonLdSite {
+  return { name: llms.name ?? llms.siteURL, url: llms.siteURL, logo: llms.logo, language: llms.language, organization: llms.organization }
 }
 
 /** The populate parameter for a content type: the source's own, else the schema-based tree. */

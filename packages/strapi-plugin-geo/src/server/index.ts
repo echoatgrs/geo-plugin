@@ -11,6 +11,8 @@ import {
   findDocumentByPath,
   ingestHits,
   lastSegment,
+  omitJsonLdTypes,
+  parseOmit,
   summarizeHits,
   toLlmsDocument,
   windowStart,
@@ -19,7 +21,7 @@ import {
   type StatsHit,
 } from '@garus-ltd/geo-core'
 import { publicAccess, type PublicAccess } from './access'
-import { mappingOptions, populateOf } from './content'
+import { jsonLdSite, mappingOptions, populateOf } from './content'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
 import { AI_REFERRAL_UID, CITATION_UID, citationMiddleware, evidenceReport, ingestReferralReport } from './evidence'
 import { inspectStrapiEntry } from './inspect'
@@ -238,10 +240,9 @@ export const controllers = {
         const found = await find(ctx)
         if (!found) return
         const { llms, doc } = found
-        const data = buildJsonLd(
-          { name: llms.name ?? llms.siteURL, url: llms.siteURL, logo: llms.logo, language: llms.language },
-          doc,
-        )
+        const built = buildJsonLd(jsonLdSite(llms), doc)
+        const omit = parseOmit(typeof ctx.query?.omit === 'string' ? ctx.query.omit : null, llms.hostManaged)
+        const data = built && omit.length ? omitJsonLdTypes(built, omit) : built
         if (!data) return sendText(ctx, 'Not found\n', 'text/plain', 404, llms.cacheMaxAge)
         sendText(ctx, JSON.stringify(data), 'application/ld+json', 200, llms.cacheMaxAge)
       },

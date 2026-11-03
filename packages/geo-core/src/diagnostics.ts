@@ -10,6 +10,7 @@
  */
 import { ipInRanges, parseCIDR, parseIP } from './cidr.js'
 import { markdownURL } from './llms.js'
+import { extractJsonLdScripts, findJsonLdConflicts } from './schema.js'
 
 // No Node imports here: geo-core also runs in edge runtimes. Adapters pass a DNS resolver.
 function isIP(value: string): 4 | 6 | 0 {
@@ -400,15 +401,38 @@ export async function runActiveChecks(options: ActiveCheckOptions): Promise<Diag
         return { id: 'ACT-HTML', status: 'pass', title: 'Article page (HTML)', detail: `${sample.url} answered 200 HTML.` }
       }),
     )
+    let conflictItem: DiagnosticItem | null = null
     items.push(
       await attempt('ACT-JSONLD', 'JSON-LD in the page', async () => {
         const res = await safeFetch(sample.url, { ...base, headers: { 'user-agent': 'GeoDiagnostics', accept: 'text/html' } })
         const found = /<script[^>]+application\/ld\+json/i.test(res.body)
+        if (found) {
+          const scripts = extractJsonLdScripts(res.body)
+          const conflicts = findJsonLdConflicts(scripts)
+          const geo = scripts.filter((s) => s.source === 'geo').length
+          conflictItem = (
+            conflicts.length
+              ? {
+                  id: 'ACT-JSONLD-CONFLICTS',
+                  status: conflicts.some((c) => c.severity === 'error') ? 'error' : 'warning',
+                  title: 'Duplicate or conflicting JSON-LD',
+                  detail: conflicts.map((c) => `${c.message}${c.properties?.length ? ` [${c.properties.join(', ')}]` : ''}`).join('\n'),
+                  suggestion: conflicts[0]!.suggestion,
+                }
+              : {
+                  id: 'ACT-JSONLD-CONFLICTS',
+                  status: 'pass',
+                  title: 'Duplicate or conflicting JSON-LD',
+                  detail: `${scripts.length} JSON-LD script${scripts.length > 1 ? 's' : ''} (${geo} from GEO); no duplicate @id or doubled types.${geo ? '' : ' GEO scripts are recognised by the data-geo-jsonld attribute of jsonLdScriptProps.'}`,
+                }
+          ) as DiagnosticItem
+        }
         return found
           ? { id: 'ACT-JSONLD', status: 'pass', title: 'JSON-LD in the page', detail: 'A JSON-LD script tag is rendered.' }
           : { id: 'ACT-JSONLD', status: res.truncated ? 'unknown' : 'notEnabled', title: 'JSON-LD in the page', detail: res.truncated ? 'Page too large to check fully.' : 'No JSON-LD script tag found.', suggestion: 'Render fetchJsonLd + jsonLdScriptProps in the page.' }
       }),
     )
+    if (conflictItem) items.push(conflictItem)
     items.push(
       await attempt('ACT-MD', 'Markdown version (.md)', async () => {
         const url = markdownURL(sample.url)

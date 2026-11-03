@@ -1,4 +1,4 @@
-import { createContentConverter, defineRules, type BotDefinition, type CheckThresholds, type ContentConverterOptions, type GeoRule, type LlmsSourceConfig } from '@garus-ltd/geo-core'
+import { createContentConverter, defineRules, type BotDefinition, type CheckThresholds, type ContentConverterOptions, type GeoRule, type LlmsSourceConfig, type OrganizationConfig } from '@garus-ltd/geo-core'
 import type { StrapiCitationConfig, StrapiReferralConfig } from './evidence'
 
 export interface StrapiLlmsSource extends LlmsSourceConfig {
@@ -36,6 +36,13 @@ export interface StrapiLlmsConfig {
   contentTypes: Record<string, StrapiLlmsSource>
   /** Logo for the JSON-LD publisher, absolute or a path on the site. */
   logo?: string
+  /** The site organization as a JSON-LD node with a stable `@id`, used as publisher of every article. */
+  organization?: OrganizationConfig
+  /**
+   * JSON-LD types the host site already outputs itself. `GET /api/geo/jsonld?omit=host` leaves them out; without
+   * `omit` the endpoint still returns everything.
+   */
+  hostManaged?: string[]
   /** Content language for JSON-LD, e.g. `en`. */
   language?: string
   /** Base for relative media URLs such as `/uploads/a.png`, usually the Strapi URL. Default: Strapi `server.url`, else `siteURL`. */

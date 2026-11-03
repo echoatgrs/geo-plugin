@@ -6,7 +6,7 @@ import {
   type Inspection,
 } from '@garus-ltd/geo-core'
 import { publicAccess } from './access'
-import { mappingOptions, populateOf } from './content'
+import { jsonLdSite, mappingOptions, populateOf } from './content'
 import type { StrapiLlmsConfig } from './config'
 import type { StrapiLike } from './types'
 
@@ -121,7 +121,7 @@ export async function inspectStrapiEntry(
   const state = { saved: !!documentId, published, publicVisible, publicReason }
   const builtin = inspectDocument(previewValues, {
     ...mappingOptions(strapi, llms, uid, source),
-    site: { name: llms.name ?? llms.siteURL, url: llms.siteURL, logo: llms.logo, language: llms.language },
+    site: jsonLdSite(llms),
     sourcesField: source.sourcesField,
     knownFields: [...attributes, 'id', 'documentId', 'createdAt', 'updatedAt', 'publishedAt'],
     thresholds: llms.checks,

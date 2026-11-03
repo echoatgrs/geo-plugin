@@ -5,7 +5,8 @@
  * requirements, they don't predict whether an AI will cite the page, and "pass" only means the
  * plugin's rule passed.
  */
-import { buildJsonLd, serializeJsonLd, type JsonLd, type JsonLdSite } from './jsonld.js'
+import { buildJsonLdDetailed, serializeJsonLd, type JsonLd, type JsonLdSite } from './jsonld.js'
+import type { SchemaIssue } from './schema.js'
 import type { ConversionWarning } from './convert.js'
 import { documentMarkdown, getField, mapLlmsDocument, sourceFields, type FieldOrigin, type LlmsDocument, type LlmsMappingOptions, type LlmsMappingSources } from './llms.js'
 
@@ -296,7 +297,8 @@ export function inspectDocument(doc: Record<string, any>, options: InspectOption
   else if (!state.publicVisible) checks.push(r('GEO-PUBLIC', 'warning', `Not in the public outputs${state.publicReason ? `: ${state.publicReason}` : '.'}`, 'Publish it and make sure anonymous visitors may read it.'))
   else checks.push(r('GEO-PUBLIC', 'pass', 'Anonymous visitors get it in llms.txt, Markdown and JSON-LD.', 'Nothing to do.'))
 
-  const jsonLd = document ? buildJsonLd(options.site, document) : null
+  const built = document ? buildJsonLdDetailed(options.site, document) : null
+  const jsonLd = built?.data ?? null
   const jsonLdScript = jsonLd ? serializeJsonLd(jsonLd) : null
   return {
     checks,
@@ -304,7 +306,7 @@ export function inspectDocument(doc: Record<string, any>, options: InspectOption
     markdown: document ? documentMarkdown(document) : null,
     jsonLd,
     jsonLdScript,
-    validation: validateJsonLd(jsonLd, document, options.source.jsonLd === false),
+    validation: validateJsonLd(jsonLd, document, options.source.jsonLd === false, built?.issues ?? []),
     diagnostics: diagnose(document, sources, options),
     sources,
     contentMarkdown: mapping.markdown,
@@ -342,9 +344,13 @@ const ARTICLE_TYPES = new Set(['Article', 'BlogPosting', 'NewsArticle', 'TechArt
  * date order, absolute URLs, the FAQPage belonging to the same page, and safe `<script>` serialization.
  * Passing means the plugin's rules pass, not Google rich result eligibility or full schema.org validation.
  */
-export function validateJsonLd(jsonLd: JsonLd | null, document: LlmsDocument | null, disabled = false): CheckResult[] {
+export function validateJsonLd(jsonLd: JsonLd | null, document: LlmsDocument | null, disabled = false, issues: SchemaIssue[] = []): CheckResult[] {
   if (disabled) return [r('LD-ENABLED', 'notApplicable', 'JSON-LD is turned off for this collection.', 'Nothing to do.')]
-  if (!jsonLd || !document) return [r('LD-ENABLED', 'error', 'No JSON-LD: the document has no frontend URL.', 'Fix the URL first.')]
+  const presetIssues = issues.map((i) =>
+    r(i.ruleId, i.severity, `${i.nodeType}${i.property ? ` ${i.property}` : ''}: ${i.message}`, i.severity === 'error' ? 'Fill or fix the field; the node is not output until then.' : 'Optional: fill or fix the field.', i.field),
+  )
+  if (!document) return [r('LD-ENABLED', 'error', 'No JSON-LD: the document has no frontend URL.', 'Fix the URL first.')]
+  if (!jsonLd) return [r('LD-ENABLED', 'error', 'No JSON-LD node could be built.', 'See the messages below.'), ...presetIssues]
   const out: CheckResult[] = []
   const script = serializeJsonLd(jsonLd)
   let parsed: any
@@ -361,7 +367,12 @@ export function validateJsonLd(jsonLd: JsonLd | null, document: LlmsDocument | n
       : r('LD-SCRIPT', 'pass', 'Safe to embed in <script type="application/ld+json"> (`<` is escaped).', 'Nothing to do.'),
   )
   const graph: any[] = Array.isArray(parsed['@graph']) ? parsed['@graph'] : [parsed]
-  const main = graph[0] ?? {}
+  const pageURL = document.canonical ?? document.url
+  const main = graph.find((n) => String(n['@id'] ?? '').startsWith(`${pageURL}#`) && n['@type'] !== 'FAQPage' && n['@type'] !== 'BreadcrumbList') ?? null
+  if (!main) {
+    out.push(r('LD-REQUIRED', 'error', `The ${document.schemaType} node was left out.`, 'See the messages below for the missing or invalid fields.'), ...presetIssues)
+    return out
+  }
   const isArticle = ARTICLE_TYPES.has(main['@type'])
   const required = isArticle ? ['@type', 'headline', 'url'] : ['@type', 'name', 'url']
   const missing = required.filter((k) => !hasValue(main[k]))
@@ -386,7 +397,9 @@ export function validateJsonLd(jsonLd: JsonLd | null, document: LlmsDocument | n
 
   const urls: Array<[string, unknown]> = [['url', main.url], ['@id', main['@id']]]
   if (Array.isArray(main.image)) main.image.forEach((u: unknown, i: number) => urls.push([`image[${i}]`, u]))
+  else if (typeof main.image === 'string') urls.push(['image', main.image])
   if (main.publisher?.logo?.url) urls.push(['publisher.logo', main.publisher.logo.url])
+  for (const n of graph) if (n !== main && n.logo?.url) urls.push([`${n['@type']}.logo`, n.logo.url])
   const badURL = urls.find(([, u]) => typeof u !== 'string' || !isHttpURL(u.split('#')[0]))
   out.push(
     badURL
@@ -404,6 +417,11 @@ export function validateJsonLd(jsonLd: JsonLd | null, document: LlmsDocument | n
     else if (!items.length || broken.length) out.push(r('LD-FAQ', 'error', `${broken.length || 'All'} FAQ questions lack a name or answer.`, 'Fill the FAQ items.'))
     else out.push(r('LD-FAQ', 'pass', `FAQPage with ${items.length} questions, on the same page as the ${main['@type']}.`, 'Nothing to do.'))
   }
+  // Every @id is defined once, and every reference points at a node in the graph or is an absolute URL.
+  const ids = graph.map((n) => n['@id']).filter(Boolean)
+  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
+  if (dupes.length) out.push(r('LD-IDS', 'error', `Duplicate @id in the graph: ${[...new Set(dupes)].join(', ')}.`, 'Report this as a plugin bug, or check `extend`.'))
+  out.push(...presetIssues)
   return out
 }
 

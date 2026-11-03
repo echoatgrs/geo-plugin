@@ -218,3 +218,19 @@ describe('AI referrals', () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 })
+
+describe('JSON-LD ownership', async () => {
+  const { fetchJsonLd, jsonLdScriptProps, jsonLdScriptTag } = await import('./index.js')
+  it('passes omit to the CMS and marks GEO scripts', async () => {
+    const seen: string[] = []
+    const fetch = async (url: URL) => {
+      seen.push(url.href)
+      return new Response('{}', { headers: { 'content-type': 'application/ld+json' } })
+    }
+    await fetchJsonLd({ source: 'https://cms.test/api/geo/jsonld', path: '/a', omit: 'host', fetch: fetch as never })
+    await fetchJsonLd({ source: 'https://cms.test/api/geo/jsonld', path: '/a', omit: ['Article', 'Organization'], fetch: fetch as never })
+    expect(seen).toEqual(['https://cms.test/api/geo/jsonld?path=%2Fa&omit=host', 'https://cms.test/api/geo/jsonld?path=%2Fa&omit=Article%2COrganization'])
+    expect(jsonLdScriptProps({})['data-geo-jsonld']).toBe('')
+    expect(jsonLdScriptTag({ a: '</script>' })).toBe('<script type="application/ld+json" data-geo-jsonld>{"a":"\\u003c/script>"}</script>')
+  })
+})

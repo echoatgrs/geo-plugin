@@ -5,6 +5,7 @@ import {
   createIPVerifier,
   findProbeInBody,
   ingestHits,
+  parseOmit,
   summarizeHits,
   windowStart,
   type BotDefinition,
@@ -275,7 +276,8 @@ export const geoPlugin =
             const path = pathParam(req)
             if (!path) return Response.json({ error: '`path` query parameter is required' }, { status: 400 })
             const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
-            const data = doc ? renderJsonLd(llms, doc) : null
+            const omit = parseOmit(new URL(req.url ?? '', 'http://x').searchParams.get('omit'), llms.hostManaged)
+            const data = doc ? renderJsonLd(llms, doc, omit) : null
             if (!data) return Response.json({ error: 'not found' }, { status: 404, headers: { 'cache-control': cacheControl(llms.cacheMaxAge, 404) } })
             return new Response(JSON.stringify(data), {
               headers: { 'content-type': 'application/ld+json; charset=utf-8', 'cache-control': cacheControl(llms.cacheMaxAge, 200) },

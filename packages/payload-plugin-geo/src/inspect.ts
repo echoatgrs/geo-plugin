@@ -6,7 +6,7 @@ import {
   type Inspection,
 } from '@garus-ltd/geo-core'
 import type { CollectionConfig, Field, Payload, PayloadRequest } from 'payload'
-import { converterFor, linkResolver, mapDoc, queryCollection, type LlmsOptions } from './llms.js'
+import { converterFor, jsonLdSite, linkResolver, mapDoc, queryCollection, type LlmsOptions } from './llms.js'
 
 export interface PayloadInspection extends Inspection {
   publicLinks?: { page?: string; markdown?: string; jsonLd?: string }
@@ -169,7 +169,7 @@ export async function inspectPayloadDocument(req: PayloadRequest, ctx: InspectCo
     converter: converterFor(ctx.llms, source),
     linkFor: linkResolver(ctx.llms),
     mediaURL: ctx.llms.mediaURL ?? ctx.serverURL,
-    site: { name: ctx.llms.name ?? ctx.llms.siteURL, url: ctx.llms.siteURL, logo: ctx.llms.logo, language: ctx.llms.language },
+    site: jsonLdSite(ctx.llms),
     sourcesField: source.sourcesField,
     knownFields,
     thresholds: ctx.llms.checks,

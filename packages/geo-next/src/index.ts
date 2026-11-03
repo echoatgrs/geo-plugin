@@ -297,6 +297,11 @@ export interface JsonLdOptions {
   base?: string
   /** Frontend path of the page, e.g. `/blog/hello`. */
   path: string
+  /**
+   * Leave these JSON-LD types out of the page, e.g. `['Article']` when the site's SEO setup already renders the
+   * article. `'host'` uses the CMS's `hostManaged` list. References by `@id` to them stay in the graph.
+   */
+  omit?: 'host' | readonly string[]
   /** Extra `fetch` options, e.g. `{ next: { revalidate: 300 } }` in Next.js. */
   init?: RequestInit & Record<string, unknown>
   fetch?: typeof fetch
@@ -314,6 +319,7 @@ export async function fetchJsonLd(options: JsonLdOptions): Promise<JsonLd | null
     return null
   }
   url.searchParams.set('path', options.path)
+  if (options.omit) url.searchParams.set('omit', typeof options.omit === 'string' ? options.omit : options.omit.join(','))
   try {
     const res = await (options.fetch ?? globalThis.fetch)(url, { ...options.init, headers: { accept: 'application/ld+json' } })
     return res.ok ? ((await res.json()) as JsonLd) : null
@@ -330,6 +336,12 @@ export async function fetchJsonLd(options: JsonLdOptions): Promise<JsonLd | null
  * return <>{data && <script {...jsonLdScriptProps(data)} />}...</>
  * ```
  */
-export function jsonLdScriptProps(data: unknown): { type: 'application/ld+json'; dangerouslySetInnerHTML: { __html: string } } {
-  return { type: 'application/ld+json', dangerouslySetInnerHTML: { __html: serializeJsonLd(data) } }
+export function jsonLdScriptProps(data: unknown): { type: 'application/ld+json'; 'data-geo-jsonld': ''; dangerouslySetInnerHTML: { __html: string } } {
+  // `data-geo-jsonld` lets the setup check tell the plugin's JSON-LD from the host site's.
+  return { type: 'application/ld+json', 'data-geo-jsonld': '', dangerouslySetInnerHTML: { __html: serializeJsonLd(data) } }
+}
+
+/** A complete `<script>` tag for templates that aren't React (Astro, Nuxt, plain HTML). Escaped like jsonLdScriptProps. */
+export function jsonLdScriptTag(data: unknown): string {
+  return `<script type="application/ld+json" data-geo-jsonld>${serializeJsonLd(data)}</script>`
 }

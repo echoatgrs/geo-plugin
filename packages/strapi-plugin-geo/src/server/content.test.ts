@@ -100,3 +100,34 @@ describe('strapi complex content', () => {
     expect(() => plugin.config.validator({ llms: { ...llms, rules: [{ id: 'bad id', check: () => null }] } } as never)).toThrow(/invalid rule id/)
   })
 })
+
+describe('strapi SEO component and presets', () => {
+  it('reads an SEO component as the fallback and builds a Product from mapped fields', async () => {
+    const entry = { title: 'Shoe', slug: 'shoe', seo: { metaTitle: 'Shoe | Shop', metaDescription: 'Best shoe', metaImage: { url: '/uploads/s.png' }, canonicalURL: '/shop/shoe' }, price: '49.00', currency: 'EUR', stock: 'InStock' }
+    const llms = {
+      siteURL: 'https://site.test',
+      mediaURL: 'https://cms.test',
+      organization: { name: 'Shop Inc.' },
+      contentTypes: {
+        [ARTICLE]: {
+          seo: { title: 'seo.metaTitle', description: 'seo.metaDescription', image: 'seo.metaImage', canonical: 'seo.canonicalURL' },
+          fields: { title: 'title' },
+          jsonLd: { type: 'Product', fields: { availability: 'stock' }, breadcrumb: { parents: [{ name: 'Shop', url: '/shop' }] } },
+        },
+      },
+    }
+    const { strapi } = fakeStrapi({ llms }, [entry])
+    const c = ctx({ path: '/articles/shoe' })
+    await controllers.page({ strapi }).jsonLd(c)
+    const graph = JSON.parse(c.body as string)['@graph']
+    expect(graph.map((n: any) => n['@type'])).toEqual(['Product', 'BreadcrumbList', 'Organization'])
+    expect(graph[0]).toMatchObject({
+      '@id': 'https://site.test/shop/shoe#product',
+      name: 'Shoe',
+      description: 'Best shoe',
+      image: ['https://cms.test/uploads/s.png'],
+      offers: { price: '49.00', priceCurrency: 'EUR', availability: 'https://schema.org/InStock', url: 'https://site.test/shop/shoe' },
+    })
+    expect(entry.seo.metaTitle).toBe('Shoe | Shop')
+  })
+})

@@ -7,6 +7,7 @@
  *   - [Title](url): description
  */
 import { defaultConverter, type ContentConverter, type ConversionWarning } from './convert.js'
+import { PRESET_FIELDS, isPresetType, type AuthorEntity, type BreadcrumbItem } from './schema.js'
 
 export interface LlmsSite {
   name: string
@@ -40,6 +41,16 @@ export interface LlmsDocument {
   schemaType?: string
   /** Extra JSON-LD properties merged into the main node. */
   jsonLd?: Record<string, unknown>
+  /** Values of a preset type's properties (Product, HowTo, …), as mapped from the document. */
+  schemaData?: Record<string, unknown>
+  /** Field each preset property was read from. */
+  schemaFields?: Record<string, string>
+  /** `minor` when prices are in minor units. */
+  priceUnit?: 'major' | 'minor'
+  /** BreadcrumbList items. */
+  breadcrumb?: BreadcrumbItem[]
+  /** Authors with profile data, when `jsonLd.author` is configured. */
+  authorEntities?: AuthorEntity[]
 }
 
 function oneLine(text: string | null | undefined): string {
@@ -184,10 +195,32 @@ export interface LlmsSourceConfig {
 }
 
 export interface JsonLdSourceConfig {
-  /** schema.org type of the main node. Default `Article`. Common: `BlogPosting`, `NewsArticle`, `TechArticle`, `WebPage`. */
+  /**
+   * schema.org type of the main node. Default `Article`. Article types: `BlogPosting`, `NewsArticle`, `TechArticle`, …;
+   * `WebPage`; or a preset with its own field mapping and checks: `Product`, `HowTo`, `LocalBusiness`, `Person`,
+   * `Organization` (see `fields`).
+   */
   type?: string
   /** Extra properties merged into the main node, e.g. `(doc) => ({ keywords: doc.tags })`. */
   extend?: (doc: Record<string, any>) => Record<string, unknown> | null | undefined
+  /**
+   * Field mapping of a preset type: preset property → field path / resolver (see PRESET_FIELDS for the keys),
+   * e.g. `{ price: 'price.amount', priceCurrency: 'price.currency', availability: 'stock' }`.
+   * Unmapped properties use the preset's default field names; nothing is guessed from the body.
+   */
+  fields?: Record<string, FieldSpec>
+  /** `minor`: prices are integer minor units (cents) and are divided exactly. Default `major` ("19.90"). */
+  priceUnit?: 'major' | 'minor'
+  /**
+   * BreadcrumbList. `true`: home, `parents`, then the page. Or return the items yourself. Never inferred from the
+   * URL alone, since a path segment isn't necessarily a page.
+   */
+  breadcrumb?: boolean | { homeName?: string; parents?: BreadcrumbItem[]; items?: (doc: Record<string, any>) => BreadcrumbItem[] | null | undefined }
+  /**
+   * Authors as Person nodes with stable `@id`s, linked from the article. Paths are read inside each author value;
+   * `url` may also be a function of the author. Without it authors stay inline names as before.
+   */
+  author?: { url?: string | ((author: Record<string, any>) => string | null | undefined); image?: string; jobTitle?: string; sameAs?: string }
 }
 
 export function getField(doc: Record<string, any>, field: string): unknown {
@@ -303,6 +336,9 @@ function authorList(value: unknown): unknown[] {
   const v = unwrap(value)
   return (Array.isArray(v) ? v : [v]).map(unwrap).filter((a) => authorName(a))
 }
+
+/** URL schemes other than http(s): never output as links or images. */
+const UNSAFE_SCHEME = /^(?!https?:)[a-z][a-z0-9+.-]*:/i
 
 export function imageURL(value: unknown): string | undefined {
   let v = unwrap(value)
@@ -484,6 +520,93 @@ export function mapLlmsDocument(doc: Record<string, any>, options: LlmsMappingOp
   }
   const url = joinURL(options.siteURL, path)
   const canonicalURL = typeof canonical.value === 'string' ? joinURL(options.siteURL, canonical.value.trim()) : null
+  const media = (v: unknown) => {
+    const u = imageURL(v)
+    return u && !UNSAFE_SCHEME.test(u) ? joinURL(options.mediaURL ?? options.siteURL, u) : undefined
+  }
+  const plainText = (v: unknown, at: string) => {
+    if (v == null || typeof v === 'string' || typeof v === 'number') return v
+    if (typeof v === 'object' && !Array.isArray(v) && typeof (v as any).name === 'string' && !(v as any).root) return (v as any).name
+    return toMarkdown(v, at).replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_~`#>]/g, '').replace(/\s+/g, ' ').trim() || null
+  }
+  let schemaData: Record<string, unknown> | undefined
+  let schemaFields: Record<string, string> | undefined
+  if (jsonLd && isPresetType(jsonLd.type)) {
+    schemaData = {}
+    schemaFields = {}
+    for (const [prop, def] of Object.entries(PRESET_FIELDS[jsonLd.type])) {
+      const spec = jsonLd.fields?.[prop]
+      const list = spec != null ? specList(spec) : (def.defaults ?? [])
+      let value: unknown
+      for (const entry of list) {
+        const c = candidate(entry, spec != null ? 'config' : 'default')
+        try {
+          value = c.read(doc)
+        } catch (error) {
+          if (strict) throw error
+          value = undefined
+        }
+        if (present(value)) {
+          schemaFields[prop] = c.label
+          break
+        }
+      }
+      if (!present(value)) continue
+      if (def.kind === 'text') value = plainText(value, schemaFields[prop]!)
+      else if (def.kind === 'image') value = media(value)
+      else if (def.kind === 'images') value = (Array.isArray(value) ? value : [value]).map(media).filter(Boolean)
+      else if (def.kind === 'list' && Array.isArray(value))
+        value = value.map((item, i) => {
+          if (!item || typeof item !== 'object') return item
+          const out: Record<string, unknown> = { ...(item as object) }
+          for (const k of ['text', 'body', 'description', 'content']) if (out[k] != null && typeof out[k] !== 'string') out[k] = plainText(out[k], `${schemaFields![prop]}[${i}].${k}`)
+          if (out.image != null) out.image = media(out.image)
+          return out
+        })
+      if (present(value)) schemaData[prop] = value
+    }
+    // Defaults from the document itself; the URL-path fallback title is never used as a name.
+    if (schemaData.name === undefined && typeof title.value === 'string') schemaData.name = title.value
+    if (schemaData.description === undefined && typeof description.value === 'string') schemaData.description = description.value
+    const img = media(image.value)
+    if (img) {
+      if (jsonLd.type === 'Organization') schemaData.logo ??= img
+      else schemaData.image ??= jsonLd.type === 'Person' ? img : [img]
+    }
+  }
+  const pageURL = canonicalURL ?? url
+  let breadcrumb: BreadcrumbItem[] | undefined
+  if (jsonLd?.breadcrumb) {
+    const cfg = jsonLd.breadcrumb === true ? {} : jsonLd.breadcrumb
+    try {
+      breadcrumb = cfg.items
+        ? (cfg.items(doc) ?? undefined)
+        : [{ name: cfg.homeName ?? 'Home', url: options.siteURL }, ...(cfg.parents ?? []), { name: typeof title.value === 'string' ? oneLine(title.value) : path, url: pageURL }]
+    } catch (error) {
+      if (strict) throw error
+    }
+  }
+  let authorEntities: AuthorEntity[] | undefined
+  if (jsonLd?.author) {
+    const a = jsonLd.author
+    authorEntities = authorList(author.value).map((item) => {
+      const obj = item && typeof item === 'object' ? (item as Record<string, any>) : {}
+      let profile: unknown
+      try {
+        profile = typeof a.url === 'function' ? a.url(obj) : a.url ? getField(obj, a.url) : undefined
+      } catch {
+        profile = undefined
+      }
+      const sameAs = a.sameAs ? getField(obj, a.sameAs) : undefined
+      return {
+        name: authorName(item),
+        url: typeof profile === 'string' ? joinURL(options.siteURL, profile) : null,
+        image: a.image ? (media(getField(obj, a.image)) ?? null) : null,
+        jobTitle: a.jobTitle && typeof getField(obj, a.jobTitle) === 'string' ? (getField(obj, a.jobTitle) as string) : null,
+        sameAs: (Array.isArray(sameAs) ? sameAs : sameAs ? [sameAs] : []).map((v: any) => (typeof v === 'string' ? v : v?.url)).filter((v): v is string => typeof v === 'string'),
+      }
+    })
+  }
   return {
     ...base,
     document: {
@@ -496,10 +619,13 @@ export function mapLlmsDocument(doc: Record<string, any>, options: LlmsMappingOp
       updatedAt: dateString(updated.value),
       publishedAt: dateString(published.value),
       authors: authorList(author.value).map(authorName),
-      image: imageValue ? joinURL(options.mediaURL ?? options.siteURL, imageValue) : null,
+      image: imageValue && !UNSAFE_SCHEME.test(imageValue) ? joinURL(options.mediaURL ?? options.siteURL, imageValue) : null,
       faq,
       schemaType: source.jsonLd === false ? undefined : (jsonLd?.type ?? 'Article'),
       jsonLd: extra,
+      ...(schemaData ? { schemaData, schemaFields, ...(jsonLd?.priceUnit ? { priceUnit: jsonLd.priceUnit } : {}) } : {}),
+      ...(breadcrumb ? { breadcrumb } : {}),
+      ...(authorEntities ? { authorEntities } : {}),
     },
   }
 }

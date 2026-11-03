@@ -75,8 +75,8 @@ function CheckList({ checks }: { checks: CheckResult[] }) {
   const sorted = [...checks].sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status))
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
-      {sorted.map((c) => (
-        <li key={c.ruleId} style={{ display: 'grid', gap: 2, paddingBottom: 8, borderBottom: border }}>
+      {sorted.map((c, i) => (
+        <li key={`${c.ruleId}:${i}`} style={{ display: 'grid', gap: 2, paddingBottom: 8, borderBottom: border }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
             <Badge status={c.status} />
             <code style={{ fontSize: 11, ...muted }}>{c.ruleId}</code>

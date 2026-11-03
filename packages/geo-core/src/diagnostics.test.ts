@@ -145,7 +145,7 @@ describe('setup checks', () => {
     })
     const items = await runActiveChecks({ siteURL: 'https://site.test', sample: facts.sample, probes, ingestEnabled: true, fetch: fetch as never, resolve: async () => ['93.184.216.34'], sleep: async () => {} })
     const by = Object.fromEntries(items.map((i) => [i.id, i.status]))
-    expect(by).toEqual({ 'ACT-HTML': 'pass', 'ACT-JSONLD': 'pass', 'ACT-MD': 'notEnabled', 'ACT-ACCEPT': 'notEnabled', 'ACT-LLMS': 'notEnabled', 'ACT-PROBE': 'pass' })
+    expect(by).toEqual({ 'ACT-HTML': 'pass', 'ACT-JSONLD': 'pass', 'ACT-JSONLD-CONFLICTS': 'pass', 'ACT-MD': 'notEnabled', 'ACT-ACCEPT': 'notEnabled', 'ACT-LLMS': 'notEnabled', 'ACT-PROBE': 'pass' })
 
     const silent = await runActiveChecks({ siteURL: 'https://site.test', sample: facts.sample, probes: new ProbeRegistry(), ingestEnabled: true, fetch: (async () => new Response('', { status: 404 })) as never, resolve: async () => ['93.184.216.34'], probeWaitMs: 5, sleep: async () => {} })
     expect(silent.find((i) => i.id === 'ACT-HTML')!.status).toBe('error')
