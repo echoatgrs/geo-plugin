@@ -315,7 +315,7 @@ function candidate(entry: string | FieldResolver, origin: FieldOrigin): Candidat
 const DEFAULTS: Record<MappedProperty, string[]> = {
   title: ['title'],
   description: ['description', 'excerpt', 'summary', 'meta.description'],
-  content: ['content', 'body'],
+  content: ['content', 'body', 'blocks', 'layout'],
   image: ['image', 'heroImage', 'coverImage', 'cover', 'featuredImage', 'meta.image'],
   author: ['author', 'authors'],
   published: ['publishedAt', 'publishedDate', 'createdAt'],

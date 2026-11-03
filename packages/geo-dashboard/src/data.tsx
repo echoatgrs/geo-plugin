@@ -175,7 +175,10 @@ export function GeoData({ load, cleanup, download, invalidations }: GeoDataProps
                 <tr><th style={cell}>When</th><th style={cell}>Event</th><th style={cell}>Target</th><th style={cell}>Status</th><th style={cell} /></tr>
               </thead>
               <tbody>
-                {notices.deliveries.map((d) => (
+                {notices.deliveries.map((d) => {
+                  // A retry is a new delivery of the same event: once one succeeded, the failed row needs nothing.
+                  const resolved = d.status === 'failed' && notices.deliveries.some((o) => o.eventId === d.eventId && o.target === d.target && o.status === 'succeeded')
+                  return (
                   <tr key={d.id}>
                     <td style={cell}>{new Date(d.createdAt).toLocaleString()}</td>
                     <td style={cell}>{d.eventType} <span style={muted}>{d.source}</span></td>
@@ -184,14 +187,16 @@ export function GeoData({ load, cleanup, download, invalidations }: GeoDataProps
                       {d.status} ({d.attempts}){d.lastError && <div style={{ ...muted, color: 'inherit', fontSize: 12 }}>{d.lastError}</div>}
                     </td>
                     <td style={cell}>
-                      {d.status === 'failed' && (
+                      {resolved && <span style={muted}>Retried, delivered</span>}
+                      {d.status === 'failed' && !resolved && (
                         <button type="button" style={btn} disabled={retrying === d.id} onClick={() => (setRetrying(d.id), invalidations.retry(d.id).finally(() => (setRetrying(null), refresh())))}>
                           Retry
                         </button>
                       )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           )}

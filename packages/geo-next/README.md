@@ -35,4 +35,20 @@ return <>{jsonLd && <script {...jsonLdScriptProps(jsonLd)} />}</>
 `markdown.source` may be a path (`/api/geo/markdown`) when the CMS runs in the same app. `fetchJsonLd` needs an absolute
 `source`, or a path plus `base` (e.g. `base: 'http://localhost:3000'`).
 
+Segmented llms.txt parts and signed cache notices from the CMS:
+
+```ts
+// app/llms/[file]/route.ts
+export const GET = llmsSegmentRoute({ source: `${process.env.CMS_URL}/api/geo/llms` })
+
+// app/api/geo-revalidate/route.ts
+export const POST = revalidationHandler({
+  secret: process.env.GEO_REVALIDATE_SECRET!,
+  onEvent: (event) => { for (const path of event.paths) revalidatePath(path) },
+})
+```
+
+Astro, Nuxt, a plain Node server or any Fetch API framework: `geoFetchHandler` (see
+[docs/frameworks.md](https://github.com/echoatgrs/geo-plugin/blob/main/docs/frameworks.md)).
+
 Uses only Fetch APIs, so `trackAICrawler(request, ctx, options)` also works in Cloudflare Workers.

@@ -32,3 +32,5 @@ export const middleware = withGeo({ endpoint: '/api/geo/ingest', secret: process
 ```
 
 Then run `payload generate:importmap`. Full docs: https://github.com/echoatgrs/geo-plugin
+
+More: [JSON-LD presets](https://github.com/echoatgrs/geo-plugin/blob/main/docs/jsonld-presets.md), [converters](https://github.com/echoatgrs/geo-plugin/blob/main/docs/converters.md), [cache notices](https://github.com/echoatgrs/geo-plugin/blob/main/docs/cache.md), [large sites](https://github.com/echoatgrs/geo-plugin/blob/main/docs/segments.md), [data maintenance](https://github.com/echoatgrs/geo-plugin/blob/main/docs/maintenance.md), [extensions](https://github.com/echoatgrs/geo-plugin/blob/main/docs/extensions.md), [upgrading](https://github.com/echoatgrs/geo-plugin/blob/main/docs/migration.md).

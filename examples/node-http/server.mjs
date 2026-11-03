@@ -51,7 +51,9 @@ async function page(path) {
   if (pageCache.has(path)) return pageCache.get(path)
   // JSON-LD from the CMS; null when the page is not a published, public entry.
   const jsonLd = await fetchJsonLd({ source: `${CMS}/api/geo/jsonld`, path }).catch(() => null)
-  const title = jsonLd?.['@graph']?.find?.((n) => n.headline || n.name)?.headline ?? 'Example site'
+  if (!jsonLd && path !== '/') return null
+  const main = jsonLd?.['@graph']?.find?.((n) => n.headline || n.name)
+  const title = main?.headline ?? main?.name ?? 'Example site'
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escape(title)}</title>${jsonLd ? jsonLdScriptTag(jsonLd) : ''}</head>
 <body><h1>${escape(title)}</h1><p>Rendered by the plain Node example for <code>${escape(path)}</code>.</p></body></html>`
   pageCache.set(path, html)
@@ -65,8 +67,9 @@ createServer(async (req, res) => {
     if (path === '/api/geo-revalidate') return send(res, revalidate ? await revalidate(request) : new Response('not configured', { status: 404 }))
     const handled = await geo(request)
     if (handled) return send(res, handled)
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(await page(path))
+    const html = await page(path)
+    res.writeHead(html ? 200 : 404, { 'content-type': 'text/html; charset=utf-8' })
+    res.end(html ?? 'Not found')
   } catch (error) {
     console.error(error)
     res.writeHead(500).end('Internal error')

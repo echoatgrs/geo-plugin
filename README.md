@@ -27,7 +27,7 @@ Visits fall into three kinds:
 | --- | --- |
 | [`@garus-ltd/geo-core`](packages/geo-core) | CMS-agnostic: bot list, IP verification, ingest, llms.txt builder, rich text to Markdown, stats |
 | [`@garus-ltd/geo-dashboard`](packages/geo-dashboard) | Shared React dashboard, rendered by both CMS adapters |
-| [`@garus-ltd/geo-next`](packages/geo-next) | Frontend SDK: proxy that reports AI crawler requests, and a route that serves llms.txt on your domain |
+| [`@garus-ltd/geo-next`](packages/geo-next) | Frontend SDK: proxy that reports AI crawler requests, routes for llms.txt (and its parts) on your domain, a cache notice receiver, and `geoFetchHandler` for Astro / Nuxt / Node |
 | [`payload-plugin-geo`](packages/payload-plugin-geo) | Payload 3 adapter: hits collection, ingest / stats / llms endpoints, dashboard on admin home and hits list |
 | [`strapi-plugin-geo`](packages/strapi-plugin-geo) | Strapi 5 adapter: hits content type, ingest / stats / llms routes, "AI Visibility" admin page |
 
@@ -372,6 +372,22 @@ Each hit is stored with `verification`:
 Lists are fetched by the CMS, cached for 24 hours, and a stale list is kept if a refresh fails.
 Add your own ranges with `verifyIPs: { staticRanges: { claudebot: ['x.x.x.x/24'] } }` (Payload).
 
+## More features
+
+| Feature | Docs |
+| --- | --- |
+| JSON-LD presets (Product/Offer, HowTo, LocalBusiness, Person, Organization, BreadcrumbList), stable `@id`s, duplicate / conflict checks | [docs/jsonld-presets.md](docs/jsonld-presets.md) |
+| Blocks, Lexical, Strapi components and dynamic zones in Markdown; your own converters | [docs/converters.md](docs/converters.md) |
+| Signed cache invalidation notices on publish / edit / unpublish / delete / permission changes, short-cached 404s | [docs/cache.md](docs/cache.md) |
+| Large sites: featured / optional entries, grouping, segmented llms.txt parts | [docs/segments.md](docs/segments.md) |
+| Retention, preview-first cleanup, CSV / JSON export (dashboard **Data** tab) | [docs/maintenance.md](docs/maintenance.md) |
+| Astro, Nuxt and plain Node frontends (`geoFetchHandler`) | [docs/frameworks.md](docs/frameworks.md), [examples/](examples) |
+| Extension APIs: bots, rules, field resolution, converters, JSON-LD, change events | [docs/extensions.md](docs/extensions.md), [examples/extension](examples/extension) |
+| New options in one place, upgrade and rollback | [docs/config-reference.md](docs/config-reference.md), [docs/migration.md](docs/migration.md) |
+
+Everything is off until configured, runs in your own CMS and frontend, and sends nothing anywhere you didn't
+configure: no telemetry, no license checks. Valid output is no promise of rich results, AI indexing or citation.
+
 ## Development
 
 ```sh
@@ -385,7 +401,7 @@ npm run typecheck
 
 1. ~~AI crawler logs~~
 2. ~~`llms.txt`, `llms-full.txt`, Markdown version of each page (`/xxx.md`)~~
-3. ~~JSON-LD from config presets (Article, FAQ)~~, more presets (Product, HowTo, BreadcrumbList)
+3. ~~JSON-LD from config presets (Article, FAQ)~~, ~~more presets (Product, HowTo, LocalBusiness, BreadcrumbList)~~
 4. ~~Admin dashboard~~, ~~per-document sidebar in the editor~~
 5. ~~AI referral visits and hand-recorded citation evidence~~; automatic citation monitoring through an authorised API
 
