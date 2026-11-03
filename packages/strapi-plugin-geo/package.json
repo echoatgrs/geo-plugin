@@ -1,6 +1,6 @@
 {
   "name": "strapi-plugin-geo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Headless GEO for Strapi 5: AI crawler logs, llms.txt and an AI visibility dashboard.",
   "license": "MIT",
   "repository": {
@@ -50,8 +50,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@garus-ltd/geo-core": "0.3.0",
-    "@garus-ltd/geo-dashboard": "0.3.0"
+    "@garus-ltd/geo-core": "0.4.0",
+    "@garus-ltd/geo-dashboard": "0.4.0"
   },
   "peerDependencies": {
     "@strapi/strapi": "^5.0.0",

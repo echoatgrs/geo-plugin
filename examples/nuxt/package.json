@@ -9,7 +9,7 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@garus-ltd/geo-next": "^0.3.0",
+    "@garus-ltd/geo-next": "^0.4.0",
     "nuxt": "4.6.2"
   }
 }

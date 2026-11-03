@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@astrojs/node": "11.1.9",
-    "@garus-ltd/geo-next": "^0.3.0",
+    "@garus-ltd/geo-next": "^0.4.0",
     "astro": "7.4.1"
   }
 }
