@@ -1,5 +1,6 @@
 import type { CrawlerStats } from '@garus-ltd/geo-core'
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { GeoData, type GeoDataProps } from './data.js'
 import { GeoEvidence, type GeoEvidenceProps } from './evidence.js'
 import { GeoSetupStatus, type GeoSetupStatusProps } from './setup.js'
 
@@ -7,6 +8,7 @@ export type { CrawlerStats }
 export { GeoSetupStatus, type GeoSetupStatusProps, type SetupReport } from './setup.js'
 export { GeoEvidence, type EvidenceReport, type GeoEvidenceProps } from './evidence.js'
 export { DocumentTraffic, type DocumentStatsResult } from './document-traffic.js'
+export { GeoData, saveDownload, downloadName, type DataReport, type DataSet, type GeoDataProps, type InvalidationReport } from './data.js'
 export { GeoPanel, type GeoPanelProps, type PanelInspection, type PreviewVersion } from './panel.js'
 
 export interface GeoDashboardProps {
@@ -23,6 +25,8 @@ export interface GeoDashboardProps {
   setup?: GeoSetupStatusProps
   /** Adds an "AI referrals & citations" tab (full layout only). */
   evidence?: Pick<GeoEvidenceProps, 'load'>
+  /** Adds a "Data" tab: retention, cleanup, export and cache notices (full layout only). */
+  data?: GeoDataProps
 }
 
 // Colors work on light and dark admin themes: neutrals derive from the inherited text color.
@@ -121,9 +125,9 @@ export const proxy = withGeo({
 }
 
 export function GeoDashboard(props: GeoDashboardProps) {
-  type View = 'overview' | 'evidence' | 'setup'
+  type View = 'overview' | 'evidence' | 'setup' | 'data'
   const [view, setView] = useState<View>('overview')
-  if (props.compact || (!props.setup && !props.evidence)) return <Overview {...props} />
+  if (props.compact || (!props.setup && !props.evidence && !props.data)) return <Overview {...props} />
   const tab = (id: View, label: string) => (
     <button
       type="button"
@@ -141,10 +145,12 @@ export function GeoDashboard(props: GeoDashboardProps) {
         {tab('overview', 'Overview')}
         {props.evidence && tab('evidence', 'AI referrals & citations')}
         {props.setup && tab('setup', 'Setup status')}
+        {props.data && tab('data', 'Data')}
       </div>
       {view === 'overview' && <Overview {...props} />}
       {view === 'evidence' && props.evidence && <GeoEvidence load={props.evidence.load} fetchStats={props.fetchStats} />}
       {view === 'setup' && props.setup && <GeoSetupStatus {...props.setup} />}
+      {view === 'data' && props.data && <GeoData {...props.data} />}
     </div>
   )
 }
@@ -188,6 +194,11 @@ function Overview({ fetchStats, compact, moreHref, hitsHref, title = 'AI visibil
 
       {error && <div style={{ ...card, color: '#d93f3f' }}>Could not load GEO stats: {error}</div>}
       {!stats && loading && <div style={muted}>Loading…</div>}
+      {stats?.historyIncomplete && (
+        <div style={{ ...card, fontSize: 13 }}>
+          History is incomplete: visits before {stats.deletedBefore?.slice(0, 10)} were deleted by a retention cleanup, so this range shows fewer visits than happened.
+        </div>
+      )}
 
       {stats && (
         <div style={{ display: 'grid', gap: 16, opacity: loading ? 0.6 : 1 }}>

@@ -6,6 +6,10 @@ import type { Verification } from './verify.js'
 export type StatsHit = Pick<CrawlerHit, 'platform' | 'purpose' | 'verification' | 'path' | 'timestamp' | 'botId'>
 
 export interface CrawlerStats {
+  /** Set by the CMS plugins: the window reaches before the last retention cleanup, so older visits are missing. */
+  historyIncomplete?: boolean
+  /** Hits older than this were deleted by the last cleanup. */
+  deletedBefore?: string | null
   from: string
   to: string
   days: number

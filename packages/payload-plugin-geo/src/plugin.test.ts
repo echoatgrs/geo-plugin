@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Config } from 'payload'
-import { AI_REFERRALS_SLUG, CITATIONS_SLUG, CRAWLER_HITS_SLUG, geoPlugin } from './index.js'
+import { AI_REFERRALS_SLUG, CITATIONS_SLUG, CRAWLER_HITS_SLUG, JOBS_SLUG, geoPlugin } from './index.js'
 
 const posts = [
   { title: 'Hello', slug: 'hello', excerpt: 'First', content: { root: { children: [{ type: 'paragraph', children: [{ type: 'text', text: 'Body' }] }] } } },
@@ -35,7 +35,7 @@ describe('geoPlugin', () => {
   const endpoint = (path: string) => config.endpoints!.find((e) => e.path === path)!
 
   it('adds the collection, endpoints and admin dashboard components', () => {
-    expect(config.collections?.map((c) => c.slug)).toEqual(['posts', CRAWLER_HITS_SLUG])
+    expect(config.collections?.map((c) => c.slug)).toEqual(['posts', CRAWLER_HITS_SLUG, JOBS_SLUG])
     expect(config.endpoints?.map((e) => `${e.method} ${e.path}`)).toEqual([
       'post /geo/ingest',
       'get /geo/stats',
@@ -44,6 +44,9 @@ describe('geoPlugin', () => {
       'get /geo/document-stats',
       'post /geo/referrals',
       'get /geo/evidence',
+      'get /geo/data',
+      'post /geo/data/cleanup',
+      'get /geo/data/export',
       'get /geo/llms.txt',
       'get /geo/llms-full.txt',
       'post /geo/inspect',
@@ -292,7 +295,7 @@ describe('geoPlugin', () => {
 
     it('adds no collections and accepts nothing unless enabled', async () => {
       const cfg = geoPlugin({ secret: 'abc', verifyIPs: false })(plain)
-      expect(cfg.collections!.map((c) => c.slug)).toEqual(['posts', CRAWLER_HITS_SLUG])
+      expect(cfg.collections!.map((c) => c.slug)).toEqual(['posts', CRAWLER_HITS_SLUG, JOBS_SLUG])
       const { req, create } = fakeRequest({ body: visit, secret: 'abc' })
       expect((await handler(cfg, '/geo/referrals')(req as never)).status).toBe(503)
       expect(create).not.toHaveBeenCalled()

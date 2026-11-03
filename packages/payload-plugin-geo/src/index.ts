@@ -11,7 +11,9 @@ import {
   parseSegmentFile,
   resolvedSegments,
   validateInvalidationOptions,
+  validateRetention,
   type InvalidationOptions,
+  type RetentionOptions,
   summarizeHits,
   windowStart,
   type BotDefinition,
@@ -31,8 +33,9 @@ import {
   type CitationOptions,
   type ReferralOptions,
 } from './evidence.js'
-import { changeHooks, invalidationEndpoints, invalidationsCollection, type ChangeContext } from './changes.js'
+import { INVALIDATIONS_SLUG, changeHooks, invalidationEndpoints, invalidationsCollection, type ChangeContext } from './changes.js'
 import { inspectPayloadDocument } from './inspect.js'
+import { JOBS_SLUG, dataEndpoints, hitsHistoryIncomplete, jobsCollection, startAutoCleanup, type DataContext } from './maintenance.js'
 import { documentStats, runSetupTest, setupReport, type DiagnosticsOptions, type SetupContext } from './setup.js'
 import {
   loadDocumentByPath,
@@ -89,6 +92,11 @@ export interface GeoPluginOptions {
    */
   invalidation?: InvalidationOptions
   /**
+   * Retention, cleanup and export of the stored GEO data (dashboard "Data" tab, `/api/geo/data*`). Deleting is
+   * off unless `allowDelete` is true; back up the database first. Export is always available to admins.
+   */
+  retention?: RetentionOptions
+  /**
    * Citation evidence entered by hand. Off by default; enabling it adds the `geo-citations` collection
    * (and `geo-citation-screenshots` unless `screenshots: false`), which needs a migration on SQL databases.
    */
@@ -97,6 +105,8 @@ export interface GeoPluginOptions {
 
 export { AI_REFERRALS_SLUG, CITATIONS_SLUG, type CitationOptions, type ReferralOptions }
 export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsDocuments, type LlmsOptions, type PayloadLlmsSource }
+export { INVALIDATIONS_SLUG } from './changes.js'
+export { JOBS_SLUG } from './maintenance.js'
 
 const MAX_STATS_HITS = 100_000
 
@@ -126,6 +136,7 @@ export const geoPlugin =
   (config: Config): Config => {
     if (options.llms) validateLlmsOptions(options.llms)
     validateInvalidationOptions(options.invalidation)
+    validateRetention(options.retention)
     const invalidationOn = !!options.llms && !!options.invalidation?.targets?.length
     let allCollections: CollectionConfig[] = []
     const changeContext: ChangeContext | null = invalidationOn ? { llms: options.llms!, collections: () => allCollections, invalidation: options.invalidation!, serverURL: config.serverURL } : null
@@ -180,7 +191,6 @@ export const geoPlugin =
       collection,
     ]
     if (changeContext) collections.push(invalidationsCollection())
-    allCollections = collections
     const referralsOn = options.referrals?.enabled === true
     const citationsOn = options.citations?.enabled === true
     if (referralsOn) collections.push(referralsCollection(options.referrals?.collection))
@@ -188,6 +198,16 @@ export const geoPlugin =
       const screenshots = options.citations?.screenshots !== false
       if (screenshots) collections.push(citationScreenshotsCollection())
       collections.push(citationsCollection({ usersSlug: config.admin?.user ?? 'users', screenshots, overrides: options.citations?.collection }))
+    }
+    collections.push(jobsCollection())
+    allCollections = collections
+    const dataContext: DataContext = {
+      retention: options.retention,
+      datasets: {
+        hits: { slug: collection.slug, time: 'timestamp' },
+        ...(referralsOn ? { referrals: { slug: AI_REFERRALS_SLUG, time: 'timestamp' } } : {}),
+        ...(changeContext ? { invalidations: { slug: INVALIDATIONS_SLUG, time: 'createdAt' } } : {}),
+      },
     }
 
     const ingestEndpoint: Endpoint = {
@@ -243,7 +263,8 @@ export const geoPlugin =
         const contentPaths = options.llms
           ? (await loadLlmsDocuments(req.payload, options.llms, collections, config.serverURL)).map((d) => d.url)
           : undefined
-        return Response.json(summarizeHits(result.docs as unknown as StatsHit[], { days, contentPaths }))
+        const history = await hitsHistoryIncomplete(req.payload, windowStart(days))
+        return Response.json({ ...summarizeHits(result.docs as unknown as StatsHit[], { days, contentPaths }), ...history })
       },
     }
 
@@ -270,6 +291,7 @@ export const geoPlugin =
       ...evidenceEndpoints({ referrals: options.referrals, citations: options.citations, secret: options.secret, probes, adminRoute: config.routes?.admin ?? '/admin' }),
     ]
     if (changeContext) endpoints.push(...invalidationEndpoints(changeContext))
+    endpoints.push(...dataEndpoints(dataContext))
     if (options.llms) {
       const llms = options.llms
       const segments = resolvedSegments(llms.segments, llms.siteURL)
@@ -354,6 +376,8 @@ export const geoPlugin =
           statsURL: `${statsBase}/geo/stats`,
           setupURL: compact ? undefined : `${statsBase}/geo/setup`,
           evidenceURL: compact ? undefined : `${statsBase}/geo/evidence`,
+          dataURL: compact ? undefined : `${statsBase}/geo/data`,
+          invalidationsURL: compact || !changeContext ? undefined : `${statsBase}/geo/invalidations`,
           compact,
           moreHref: hitsHref,
           hitsHref,
@@ -390,6 +414,7 @@ export const geoPlugin =
         if (referralsOn && !options.secret) {
           payload.logger.warn('[geo] `referrals` is enabled but no secret is configured, so referral reports are refused. Set `secret` in geoPlugin().')
         }
+        startAutoCleanup(payload, dataContext)
         await onInit?.(payload)
       },
     }

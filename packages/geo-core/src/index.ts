@@ -218,3 +218,4 @@ export {
   type InvalidationTarget,
   type NotifierDeps,
 } from './changes.js'
+export * from './maintenance.js'

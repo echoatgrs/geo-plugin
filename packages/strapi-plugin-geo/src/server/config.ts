@@ -1,4 +1,4 @@
-import { createContentConverter, defineRules, type BotDefinition, type CheckThresholds, type ContentConverterOptions, type GeoRule, type LlmsSourceConfig, type OrganizationConfig, type SegmentOptions, type InvalidationOptions, validateInvalidationOptions } from '@garus-ltd/geo-core'
+import { createContentConverter, defineRules, type BotDefinition, type CheckThresholds, type ContentConverterOptions, type GeoRule, type LlmsSourceConfig, type OrganizationConfig, type SegmentOptions, type InvalidationOptions, type RetentionOptions, validateInvalidationOptions, validateRetention } from '@garus-ltd/geo-core'
 import type { StrapiCitationConfig, StrapiReferralConfig } from './evidence'
 
 export interface StrapiLlmsSource extends LlmsSourceConfig {
@@ -116,12 +116,18 @@ export interface GeoStrapiConfig {
    * Delivery results are kept in the `Cache Notice` content type. Off unless targets are set.
    */
   invalidation?: InvalidationOptions
+  /**
+   * Retention, cleanup and export of the stored GEO data (dashboard "Data" tab, admin `/geo/data*`). Deleting is
+   * off unless `allowDelete` is true; back up the database first. Export is always available to admins.
+   */
+  retention?: RetentionOptions
 }
 
 export default {
   default: (): GeoStrapiConfig => ({ secret: '', verifyIPs: true, storeSpoofed: true, enabled: true, llms: null }),
   validator(config: Partial<GeoStrapiConfig>) {
     validateInvalidationOptions(config.invalidation)
+    validateRetention(config.retention)
     if (config.secret !== undefined && typeof config.secret !== 'string') {
       throw new Error('[geo] `secret` must be a string')
     }

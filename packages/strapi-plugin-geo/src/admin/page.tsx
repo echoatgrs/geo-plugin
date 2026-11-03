@@ -1,4 +1,4 @@
-import { GeoDashboard, type CrawlerStats, type EvidenceReport, type SetupReport } from '@garus-ltd/geo-dashboard'
+import { GeoDashboard, saveDownload, type CrawlerStats, type DataReport, type DataSet, type EvidenceReport, type InvalidationReport, type SetupReport } from '@garus-ltd/geo-dashboard'
 import type { DiagnosticItem } from '@garus-ltd/geo-core'
 import { useFetchClient } from '@strapi/strapi/admin'
 import { useCallback, useMemo } from 'react'
@@ -33,6 +33,26 @@ export default function GeoPage() {
     }),
     [get],
   )
+  const data = useMemo(
+    () => ({
+      load: async () => (await get<DataReport>('/geo/data')).data,
+      cleanup: async (body: { dataset: DataSet; before: string; confirm: boolean }) =>
+        (await post<{ count?: number; deleted?: number; error?: string }>('/geo/data/cleanup', body, { validateStatus: () => true } as never)).data,
+      async download(dataset: DataSet, format: 'csv' | 'json', sensitive: boolean) {
+        // The admin API authenticates with a bearer token, so fetch through the admin client, then save the file.
+        const res = await get<unknown>(`/geo/data/export?dataset=${dataset}&format=${format}${sensitive ? '&sensitive=1' : ''}`, { responseType: 'blob' } as never)
+        const body = res.data
+        const blob = body instanceof Blob ? body : new Blob([typeof body === 'string' ? body : JSON.stringify(body)], { type: format === 'csv' ? 'text/csv' : 'application/json' })
+        saveDownload(blob, `geo-${dataset}-${new Date().toISOString().slice(0, 10)}.${format}`)
+      },
+      invalidations: {
+        load: async () => (await get<InvalidationReport>('/geo/invalidations')).data,
+        retry: async (id: string | number) => (await post<{ status?: string; lastError?: string | null; error?: string }>('/geo/invalidations/retry', { id }, { validateStatus: () => true } as never)).data,
+        flush: async () => (await post('/geo/invalidations/flush', {}, { validateStatus: () => true } as never)).data,
+      },
+    }),
+    [get, post],
+  )
   const fetchStats = useCallback(
     async (days: number) => (await get<CrawlerStats>(`/geo/stats?days=${days}`)).data,
     [get],
@@ -44,6 +64,7 @@ export default function GeoPage() {
         hitsHref={`${adminBase()}${HITS_PATH}`}
         setup={setup}
         evidence={evidence}
+        data={data}
       />
     </main>
   )

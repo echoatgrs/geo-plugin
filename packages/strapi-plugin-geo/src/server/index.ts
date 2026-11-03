@@ -32,17 +32,21 @@ import { jsonLdSite, mappingOptions, pluralName, populateOf } from './content'
 import config, { type GeoStrapiConfig, type StrapiLlmsConfig } from './config'
 import { AI_REFERRAL_UID, CITATION_UID, citationMiddleware, evidenceReport, ingestReferralReport } from './evidence'
 import { changeMiddleware, invalidationControllers, subscribePermissionChanges, type ChangeDeps } from './changes'
+import { INVALIDATION_UID } from './changes'
 import { inspectStrapiEntry } from './inspect'
+import { JOB_UID, dataControllers, hitsHistoryIncomplete, startAutoCleanup, type DataContext } from './maintenance'
 import { documentStats, runSetupTest, setupReport, type SetupState } from './setup'
 import aiReferralSchema from './content-types/ai-referral/schema'
 import citationSchema from './content-types/citation/schema'
 import crawlerHitSchema from './content-types/crawler-hit/schema'
 import invalidationSchema from './content-types/invalidation/schema'
+import jobSchema from './content-types/job/schema'
 import type { KoaContextLike, StrapiLike } from './types'
 
 export { checkFindRoute, publicAccess, type PublicAccess } from './access'
 export { AI_REFERRAL_UID, CITATION_UID } from './evidence'
 export { INVALIDATION_UID } from './changes'
+export { JOB_UID } from './maintenance'
 export const CRAWLER_HIT_UID = 'plugin::geo.crawler-hit'
 const PAGE_SIZE = 1000
 const MAX_STATS_HITS = 100_000
@@ -64,6 +68,7 @@ function getConfig(strapi: StrapiLike): GeoStrapiConfig {
     referrals: plugin.config('referrals', {}),
     citations: plugin.config('citations', {}),
     invalidation: plugin.config('invalidation', undefined),
+    retention: plugin.config('retention', undefined),
   }
 }
 
@@ -288,7 +293,20 @@ function changeDeps(strapi: StrapiLike): ChangeDeps {
   }
 }
 
+function dataContext(strapi: StrapiLike): DataContext {
+  const cfg = getConfig(strapi)
+  return {
+    retention: cfg.retention,
+    datasets: {
+      hits: { uid: CRAWLER_HIT_UID, time: 'timestamp' },
+      ...(cfg.referrals?.enabled ? { referrals: { uid: AI_REFERRAL_UID, time: 'timestamp' } } : {}),
+      ...(cfg.invalidation?.targets?.length ? { invalidations: { uid: INVALIDATION_UID, time: 'createdAt' } } : {}),
+    },
+  }
+}
+
 export const controllers = {
+  data: ({ strapi }: { strapi: StrapiLike }) => dataControllers(strapi, () => dataContext(strapi)),
   invalidations: ({ strapi }: { strapi: StrapiLike }) => invalidationControllers(strapi, changeDeps(strapi)),
   ingest: ({ strapi }: { strapi: StrapiLike }) => ({
     async ingest(ctx: KoaContextLike) {
@@ -426,7 +444,7 @@ export const controllers = {
         llms ? loadLlmsDocuments(strapi, llms).then((docs) => docs.map((d) => d.url)) : Promise.resolve(undefined),
       ])
       ctx.status = 200
-      ctx.body = summarizeHits(hits, { days, contentPaths })
+      ctx.body = { ...summarizeHits(hits, { days, contentPaths }), ...(await hitsHistoryIncomplete(strapi, windowStart(days))) }
     },
   }),
 }
@@ -462,6 +480,9 @@ export const routes = {
       { method: 'POST', path: '/setup/test', handler: 'setup.test', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'GET', path: '/document-stats', handler: 'setup.documentStats', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'GET', path: '/evidence', handler: 'referrals.evidence', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'GET', path: '/data', handler: 'data.report', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'POST', path: '/data/cleanup', handler: 'data.cleanup', config: { policies: ['admin::isAuthenticatedAdmin'] } },
+      { method: 'GET', path: '/data/export', handler: 'data.export', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'GET', path: '/invalidations', handler: 'invalidations.list', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'POST', path: '/invalidations/retry', handler: 'invalidations.retry', config: { policies: ['admin::isAuthenticatedAdmin'] } },
       { method: 'POST', path: '/invalidations/flush', handler: 'invalidations.flush', config: { policies: ['admin::isAuthenticatedAdmin'] } },
@@ -477,6 +498,7 @@ export default {
     'ai-referral': { schema: aiReferralSchema },
     citation: { schema: citationSchema },
     invalidation: { schema: invalidationSchema },
+    job: { schema: jobSchema },
   },
   controllers,
   routes,
@@ -488,6 +510,7 @@ export default {
   bootstrap({ strapi }: { strapi: StrapiLike }) {
     const cfg = getConfig(strapi)
     if (cfg.llms && cfg.invalidation?.targets?.length) subscribePermissionChanges(strapi as never, changeDeps(strapi))
+    startAutoCleanup(strapi, dataContext(strapi))
     if (!cfg.secret) {
       strapi.log.warn('[geo] No secret configured: anyone can post crawler hits to /api/geo/ingest.')
       if (cfg.referrals?.enabled) strapi.log.warn('[geo] `referrals` is enabled but no secret is configured, so referral reports are refused.')

@@ -1,5 +1,10 @@
 import {
   GeoDashboard,
+  downloadName,
+  saveDownload,
+  type DataReport,
+  type DataSet,
+  type InvalidationReport,
   GeoPanel,
   type CrawlerStats,
   type DocumentStatsResult,
@@ -19,6 +24,10 @@ export interface GeoDashboardClientProps {
   setupURL?: string
   /** AI referrals & citation evidence endpoint; adds that tab. */
   evidenceURL?: string
+  /** Data tab endpoint (`/api/geo/data`); adds the "Data" tab. */
+  dataURL?: string
+  /** Cache notice endpoint (`/api/geo/invalidations`), when invalidation targets are configured. */
+  invalidationsURL?: string
   compact?: boolean
   moreHref?: string
   hitsHref?: string
@@ -31,7 +40,7 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function GeoDashboardClient({ statsURL, setupURL, evidenceURL, compact, moreHref, hitsHref }: GeoDashboardClientProps) {
+export function GeoDashboardClient({ statsURL, setupURL, evidenceURL, dataURL, invalidationsURL, compact, moreHref, hitsHref }: GeoDashboardClientProps) {
   const fetchStats = useCallback(
     async (days: number): Promise<CrawlerStats> => {
       const res = await fetch(`${statsURL}?days=${days}`, { credentials: 'include' })
@@ -54,7 +63,28 @@ export function GeoDashboardClient({ statsURL, setupURL, evidenceURL, compact, m
     () => (evidenceURL ? { load: (days: number, signal: AbortSignal) => json<EvidenceReport>(`${evidenceURL}?days=${days}`, { signal }) } : undefined),
     [evidenceURL],
   )
-  const dashboard = <GeoDashboard fetchStats={fetchStats} compact={compact} moreHref={moreHref} hitsHref={hitsHref} setup={setup} evidence={evidence} />
+  const data = useMemo(() => {
+    if (!dataURL) return undefined
+    const postJSON = <T,>(url: string, body: unknown) =>
+      fetch(url, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<T>)
+    return {
+      load: () => json<DataReport>(dataURL),
+      cleanup: (body: { dataset: DataSet; before: string; confirm: boolean }) => postJSON<{ count?: number; deleted?: number; error?: string }>(`${dataURL}/cleanup`, body),
+      async download(dataset: DataSet, format: 'csv' | 'json', sensitive: boolean) {
+        const res = await fetch(`${dataURL}/export?dataset=${dataset}&format=${format}${sensitive ? '&sensitive=1' : ''}`, { credentials: 'include' })
+        if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`)
+        saveDownload(await res.blob(), downloadName(res.headers.get('content-disposition'), `geo-${dataset}.${format}`))
+      },
+      invalidations: invalidationsURL
+        ? {
+            load: () => json<InvalidationReport>(invalidationsURL),
+            retry: (id: string | number) => postJSON<{ status?: string; lastError?: string | null; error?: string }>(`${invalidationsURL}/retry`, { id }),
+            flush: () => postJSON(`${invalidationsURL}/flush`, {}),
+          }
+        : undefined,
+    }
+  }, [dataURL, invalidationsURL])
+  const dashboard = <GeoDashboard fetchStats={fetchStats} compact={compact} moreHref={moreHref} hitsHref={hitsHref} setup={setup} evidence={evidence} data={data} />
   // `beforeList` renders outside the list view's gutter, so add Payload's own gutter around the full dashboard.
   if (compact) return dashboard
   return <div style={{ padding: '0 var(--gutter-h, 60px)', marginBottom: 40 }}>{dashboard}</div>
