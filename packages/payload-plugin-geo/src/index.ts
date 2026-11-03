@@ -4,8 +4,14 @@ import {
   ProbeRegistry,
   createIPVerifier,
   findProbeInBody,
+  buildSegment,
+  buildSegmentIndex,
   ingestHits,
   parseOmit,
+  parseSegmentFile,
+  resolvedSegments,
+  validateInvalidationOptions,
+  type InvalidationOptions,
   summarizeHits,
   windowStart,
   type BotDefinition,
@@ -25,11 +31,15 @@ import {
   type CitationOptions,
   type ReferralOptions,
 } from './evidence.js'
+import { changeHooks, invalidationEndpoints, invalidationsCollection, type ChangeContext } from './changes.js'
 import { inspectPayloadDocument } from './inspect.js'
 import { documentStats, runSetupTest, setupReport, type DiagnosticsOptions, type SetupContext } from './setup.js'
 import {
   loadDocumentByPath,
   loadLlmsDocuments,
+  loadLlmsListing,
+  llmsSite,
+  segmentSources,
   validateLlmsOptions,
   renderJsonLd,
   renderLlms,
@@ -73,6 +83,12 @@ export interface GeoPluginOptions {
    */
   referrals?: ReferralOptions
   /**
+   * Cache invalidation notices: after a publish, edit, unpublish or delete in `llms.collections`, POST a signed
+   * event to these targets (e.g. the frontend's revalidation route). Adds the `geo-invalidations` collection
+   * (a migration on SQL databases). Off unless targets are set.
+   */
+  invalidation?: InvalidationOptions
+  /**
    * Citation evidence entered by hand. Off by default; enabling it adds the `geo-citations` collection
    * (and `geo-citation-screenshots` unless `screenshots: false`), which needs a migration on SQL databases.
    */
@@ -85,16 +101,18 @@ export { CRAWLER_HITS_SLUG, crawlerHitsCollection, loadDocumentByPath, loadLlmsD
 const MAX_STATS_HITS = 100_000
 
 /** `Cache-Control` for public output. Errors are cached briefly so a newly published page shows up soon. */
-export function cacheControl(maxAge: number | undefined, status: number): string {
+export function cacheControl(maxAge: number | undefined, status: number, notFoundMaxAge?: number): string {
   const age = maxAge ?? 300
   if (age <= 0) return 'no-store'
-  return `public, max-age=${status === 200 ? age : Math.min(age, 60)}`
+  if (status === 200) return `public, max-age=${age}`
+  const short = notFoundMaxAge ?? Math.min(age, 60)
+  return short <= 0 ? 'no-store' : `public, max-age=${Math.min(short, age)}`
 }
 
-function text(body: string, status = 200, type = 'text/plain', maxAge?: number): Response {
+function text(body: string, status = 200, type = 'text/plain', maxAge?: number, notFoundMaxAge?: number): Response {
   return new Response(body, {
     status,
-    headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': cacheControl(maxAge, status) },
+    headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': cacheControl(maxAge, status, notFoundMaxAge) },
   })
 }
 
@@ -107,6 +125,10 @@ export const geoPlugin =
   (options: GeoPluginOptions = {}): Plugin =>
   (config: Config): Config => {
     if (options.llms) validateLlmsOptions(options.llms)
+    validateInvalidationOptions(options.invalidation)
+    const invalidationOn = !!options.llms && !!options.invalidation?.targets?.length
+    let allCollections: CollectionConfig[] = []
+    const changeContext: ChangeContext | null = invalidationOn ? { llms: options.llms!, collections: () => allCollections, invalidation: options.invalidation!, serverURL: config.serverURL } : null
     const verifyIPs = options.verifyIPs ?? true
     const verifier = verifyIPs ? createIPVerifier(verifyIPs === true ? {} : verifyIPs) : undefined
     const probes = new ProbeRegistry()
@@ -141,9 +163,24 @@ export const geoPlugin =
               ],
             }
           : c,
-      ),
+      ).map((c) => {
+        if (!changeContext || !options.llms!.collections[c.slug]) return c
+        const h = changeHooks(c.slug, changeContext)
+        return {
+          ...c,
+          hooks: {
+            ...c.hooks,
+            beforeChange: [...(c.hooks?.beforeChange ?? []), h.beforeChange],
+            afterChange: [...(c.hooks?.afterChange ?? []), h.afterChange],
+            beforeDelete: [...(c.hooks?.beforeDelete ?? []), h.beforeDelete],
+            afterDelete: [...(c.hooks?.afterDelete ?? []), h.afterDelete],
+          },
+        }
+      }),
       collection,
     ]
+    if (changeContext) collections.push(invalidationsCollection())
+    allCollections = collections
     const referralsOn = options.referrals?.enabled === true
     const citationsOn = options.citations?.enabled === true
     if (referralsOn) collections.push(referralsCollection(options.referrals?.collection))
@@ -232,16 +269,37 @@ export const geoPlugin =
       { path: '/geo/document-stats', method: 'get', handler: (req) => documentStats(req, setupContext) },
       ...evidenceEndpoints({ referrals: options.referrals, citations: options.citations, secret: options.secret, probes, adminRoute: config.routes?.admin ?? '/admin' }),
     ]
+    if (changeContext) endpoints.push(...invalidationEndpoints(changeContext))
     if (options.llms) {
       const llms = options.llms
+      const segments = resolvedSegments(llms.segments, llms.siteURL)
+      const reply = (body: string | null, type = 'text/plain') =>
+        body === null ? text('Not found\n', 404, 'text/plain', llms.cacheMaxAge, llms.notFoundMaxAge) : text(body, 200, type, llms.cacheMaxAge)
       for (const full of [false, true]) {
         endpoints.push({
           path: full ? '/geo/llms-full.txt' : '/geo/llms.txt',
           method: 'get',
-          handler: async (req) =>
-            text(renderLlms(llms, await loadLlmsDocuments(req.payload, llms, collections, config.serverURL), full), 200, 'text/plain', llms.cacheMaxAge),
+          handler: async (req) => {
+            if (segments.enabled) {
+              return reply(await buildSegmentIndex(llmsSite(llms), segmentSources(req.payload, llms, collections, config.serverURL), llms.segments, llms.siteURL, { full, markdownLinks: llms.markdownLinks }))
+            }
+            const listing = await loadLlmsListing(req.payload, llms, collections, config.serverURL)
+            return reply(renderLlms(llms, listing.docs, full, listing.notes))
+          },
         })
       }
+      // Part files of segmented llms.txt: `/api/geo/llms/<collection>-<n>.txt` and `…-<n>-full.txt`.
+      if (segments.enabled) endpoints.push({
+        path: '/geo/llms/:file',
+        method: 'get',
+        handler: async (req) => {
+          const file = String((req as { routeParams?: Record<string, unknown> }).routeParams?.file ?? new URL(req.url ?? '', 'http://x').pathname.split('/').pop() ?? '')
+          const parsed = parseSegmentFile(file)
+          const source = parsed && segmentSources(req.payload, llms, collections, config.serverURL).find((s) => s.key === parsed.key)
+          if (!parsed || !source) return reply(null)
+          return reply(await buildSegment(llmsSite(llms), source, parsed.part, parsed.full, llms.segments, llms.siteURL, { markdownLinks: llms.markdownLinks }))
+        },
+      })
       // Editor checks and previews of the current (possibly unsaved) edits: logged-in users only, never cached.
       endpoints.push({
         path: '/geo/inspect',
@@ -266,7 +324,7 @@ export const geoPlugin =
             const path = pathParam(req)
             if (!path) return text('`path` query parameter is required\n', 400)
             const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
-            return doc ? text(renderMarkdown(doc), 200, 'text/markdown', llms.cacheMaxAge) : text('Not found\n', 404, 'text/plain', llms.cacheMaxAge)
+            return doc ? text(renderMarkdown(doc), 200, 'text/markdown', llms.cacheMaxAge) : text('Not found\n', 404, 'text/plain', llms.cacheMaxAge, llms.notFoundMaxAge)
           },
         },
         {
@@ -278,7 +336,7 @@ export const geoPlugin =
             const doc = await loadDocumentByPath(req.payload, llms, collections, path, config.serverURL)
             const omit = parseOmit(new URL(req.url ?? '', 'http://x').searchParams.get('omit'), llms.hostManaged)
             const data = doc ? renderJsonLd(llms, doc, omit) : null
-            if (!data) return Response.json({ error: 'not found' }, { status: 404, headers: { 'cache-control': cacheControl(llms.cacheMaxAge, 404) } })
+            if (!data) return Response.json({ error: 'not found' }, { status: 404, headers: { 'cache-control': cacheControl(llms.cacheMaxAge, 404, llms.notFoundMaxAge) } })
             return new Response(JSON.stringify(data), {
               headers: { 'content-type': 'application/ld+json; charset=utf-8', 'cache-control': cacheControl(llms.cacheMaxAge, 200) },
             })

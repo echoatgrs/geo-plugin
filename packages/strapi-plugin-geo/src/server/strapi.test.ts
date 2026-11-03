@@ -138,6 +138,7 @@ describe('strapi-plugin-geo', () => {
       'POST /referrals',
       'GET /llms.txt',
       'GET /llms-full.txt',
+      'GET /llms/:file',
       'GET /markdown',
       'GET /jsonld',
     ])

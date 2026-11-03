@@ -25,6 +25,10 @@ export interface LlmsDocument {
   description?: string | null
   /** Section heading the document is listed under, e.g. `Blog`. */
   section?: string
+  /** Listed first in its section (`featured` of the source). */
+  featured?: boolean
+  /** Listed under "## Optional" (llmstxt.org: may be skipped for a short context). */
+  optional?: boolean
   /** Full content as Markdown, used by llms-full.txt. */
   markdown?: string
   /** ISO date, shown in llms-full.txt when present. */
@@ -88,15 +92,20 @@ function header(site: LlmsSite): string[] {
 function groupBySection(docs: LlmsDocument[]): Map<string, LlmsDocument[]> {
   const sections = new Map<string, LlmsDocument[]>()
   for (const doc of docs) {
+    if (doc.optional) continue
     const key = doc.section || 'Pages'
     sections.set(key, [...(sections.get(key) ?? []), doc])
   }
+  // Featured documents first within their section; otherwise the source order is kept.
+  for (const [key, list] of sections) sections.set(key, [...list.filter((d) => d.featured), ...list.filter((d) => !d.featured)])
   return sections
 }
 
 export interface LlmsTxtOptions {
   /** Link each entry to its Markdown version (`/blog/post.md`), as llmstxt.org suggests. Default false. */
   markdownLinks?: boolean
+  /** Visible notes per section, e.g. that a limit cut the list. */
+  sectionNotes?: Record<string, string>
 }
 
 /** `https://site/blog/post` -> `https://site/blog/post.md`, and the site root -> `/index.md`. */
@@ -107,24 +116,66 @@ export function markdownURL(url: string): string {
   return md + rest
 }
 
-export function buildLlmsTxt(site: LlmsSite, docs: LlmsDocument[], options: LlmsTxtOptions = {}): string {
-  const lines = header(site)
-  for (const [section, items] of groupBySection(docs)) {
-    lines.push(`## ${section}`, '')
-    for (const doc of items) {
-      const desc = oneLine(doc.description)
-      const url = options.markdownLinks ? markdownURL(doc.url) : doc.url
-      lines.push(`- [${escapeLinkText(oneLine(doc.title))}](${url})${desc ? `: ${desc}` : ''}`)
-    }
-    lines.push('')
-  }
-  return lines.join('\n').trimEnd() + '\n'
+function entryLine(doc: LlmsDocument, markdownLinks?: boolean): string {
+  const desc = oneLine(doc.description)
+  const url = markdownLinks ? markdownURL(doc.url) : doc.url
+  return `- [${escapeLinkText(oneLine(doc.title))}](${url})${desc ? `: ${desc}` : ''}`
 }
 
+/** The section and entry lines of llms.txt (without the header). */
+export function llmsSectionLines(docs: LlmsDocument[], options: LlmsTxtOptions = {}): string[] {
+  const lines: string[] = []
+  const sections = groupBySection(docs)
+  for (const [section, items] of sections) {
+    lines.push(`## ${section}`, '')
+    for (const doc of items) lines.push(entryLine(doc, options.markdownLinks))
+    const note = options.sectionNotes?.[section]
+    if (note) lines.push('', `_${note}_`)
+    lines.push('')
+  }
+  for (const [section, note] of Object.entries(options.sectionNotes ?? {})) {
+    if (!sections.has(section)) lines.push(`## ${section}`, '', `_${note}_`, '')
+  }
+  // llmstxt.org: links under "Optional" can be skipped when a shorter context is needed.
+  const optional = docs.filter((d) => d.optional)
+  if (optional.length) {
+    lines.push('## Optional', '')
+    for (const doc of optional) lines.push(entryLine(doc, options.markdownLinks))
+    lines.push('')
+  }
+  return lines
+}
+
+export function buildLlmsTxt(site: LlmsSite, docs: LlmsDocument[], options: LlmsTxtOptions = {}): string {
+  return [...header(site), ...llmsSectionLines(docs, options)].join('\n').trimEnd() + '\n'
+}
+
+export interface LlmsFullOptions {
+  /** Stop adding documents beyond this many bytes (UTF-8) and say so at the end. Default 5 MB. */
+  maxBytes?: number
+  /** Visible notes at the end, e.g. that a limit cut the list. */
+  notes?: string[]
+}
+
+const encoder = new TextEncoder()
+
 /** Every document's full Markdown in one file, for assistants that read a single URL. */
-export function buildLlmsFullTxt(site: LlmsSite, docs: LlmsDocument[]): string {
+export function buildLlmsFullTxt(site: LlmsSite, docs: LlmsDocument[], options: LlmsFullOptions = {}): string {
+  const max = options.maxBytes ?? 5_000_000
   const lines = header(site)
-  for (const doc of docs) lines.push('---', '', documentMarkdown(doc))
+  let size = encoder.encode(lines.join('\n')).length
+  let included = 0
+  for (const doc of docs) {
+    const part = ['---', '', documentMarkdown(doc)].join('\n')
+    const bytes = encoder.encode(part).length + 1
+    if (size + bytes > max && included > 0) break
+    lines.push(part)
+    size += bytes
+    included++
+  }
+  const notes = [...(options.notes ?? [])]
+  if (included < docs.length) notes.push(`This file stops after ${included} of ${docs.length} documents (size limit ${max} bytes). The rest are not included here.`)
+  if (notes.length) lines.push('---', '', ...notes.map((n) => `_${n}_`), '')
   return lines.join('\n').trimEnd() + '\n'
 }
 
@@ -192,6 +243,17 @@ export interface LlmsSourceConfig {
   jsonLd?: false | JsonLdSourceConfig
   /** Field holding the document's sources / references. Only the editor panel uses it, to check it is filled. */
   sourcesField?: string
+  /**
+   * Extra per-document filter after the CMS's own permission filtering. It can only remove documents: drafts and
+   * private documents never come back through it.
+   */
+  include?: (doc: Record<string, any>) => boolean
+  /** Section of each document, e.g. by category. Default `section`. */
+  group?: (doc: Record<string, any>) => string | null | undefined
+  /** Documents listed first in their section: a boolean field path or a function. */
+  featured?: string | ((doc: Record<string, any>) => boolean)
+  /** Documents listed under "## Optional": `true` for the whole source, a field path or a function. */
+  optional?: boolean | string | ((doc: Record<string, any>) => boolean)
 }
 
 export interface JsonLdSourceConfig {
@@ -614,7 +676,9 @@ export function mapLlmsDocument(doc: Record<string, any>, options: LlmsMappingOp
       url,
       ...(canonicalURL ? { canonical: canonicalURL } : {}),
       description: typeof description.value === 'string' ? description.value : null,
-      section: source.section ?? options.name,
+      section: groupOf(doc, source, options.name, strict),
+      ...(flag(doc, source.featured, strict) ? { featured: true } : {}),
+      ...(flag(doc, source.optional, strict) ? { optional: true } : {}),
       markdown,
       updatedAt: dateString(updated.value),
       publishedAt: dateString(published.value),
@@ -627,6 +691,39 @@ export function mapLlmsDocument(doc: Record<string, any>, options: LlmsMappingOp
       ...(breadcrumb ? { breadcrumb } : {}),
       ...(authorEntities ? { authorEntities } : {}),
     },
+  }
+}
+
+function groupOf(doc: Record<string, any>, source: LlmsSourceConfig, name: string, strict: boolean): string {
+  if (source.group) {
+    try {
+      const g = source.group(doc)
+      if (typeof g === 'string' && g.trim()) return oneLine(g)
+    } catch (error) {
+      if (strict) throw error
+    }
+  }
+  return source.section ?? name
+}
+
+function flag(doc: Record<string, any>, spec: boolean | string | ((doc: Record<string, any>) => boolean) | undefined, strict: boolean): boolean {
+  if (spec == null || spec === false) return false
+  if (spec === true) return true
+  try {
+    return typeof spec === 'string' ? getField(doc, spec) === true : spec(doc) === true
+  } catch (error) {
+    if (strict) throw error
+    return false
+  }
+}
+
+/** Whether a mapped document passes the source's `include` filter. A throwing filter excludes it. */
+export function included(doc: Record<string, any>, source: LlmsSourceConfig): boolean {
+  if (!source.include) return true
+  try {
+    return source.include(doc) === true
+  } catch {
+    return false
   }
 }
 

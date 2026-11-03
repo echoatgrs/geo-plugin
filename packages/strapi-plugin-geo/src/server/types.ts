@@ -4,6 +4,7 @@ export interface DocumentServiceLike {
   create(params: { data: Record<string, unknown> }): Promise<unknown>
   findMany(params?: Record<string, unknown>): Promise<Record<string, any>[]>
   findOne?(params: Record<string, unknown>): Promise<Record<string, any> | null>
+  count?(params?: Record<string, unknown>): Promise<number>
 }
 
 export interface StrapiLike {
