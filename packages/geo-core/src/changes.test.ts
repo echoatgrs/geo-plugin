@@ -114,3 +114,18 @@ describe('receiving', () => {
     expect(parseChangeEvent(JSON.stringify(siteChangeEvent('config', site)))).not.toBeNull()
   })
 })
+
+describe('onChange', () => {
+  it('runs the in-process listener first, and its errors never stop the notices', async () => {
+    const { invalidationActive } = await import('./index.js')
+    const event = siteChangeEvent('config', site)
+    const seen: string[] = []
+    const fetch = vi.fn(async () => new Response('ok'))
+    const records = await notifyChange(event, { targets: [target], onChange: (e) => { seen.push(e.id); throw new Error('boom') } }, { fetch: fetch as never, resolve, log: () => {} })
+    expect(seen).toEqual([event.id])
+    expect(records[0]!.status).toBe('succeeded')
+    expect(invalidationActive({ targets: [], onChange: () => {} })).toBe(true)
+    expect(invalidationActive({ targets: [] })).toBe(false)
+    expect(() => validateInvalidationOptions({ targets: [], onChange: 'x' as never })).toThrow()
+  })
+})

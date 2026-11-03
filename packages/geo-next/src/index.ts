@@ -388,6 +388,44 @@ export function revalidationHandler(options: RevalidationOptions): (request: Req
   }
 }
 
+export interface GeoFetchOptions extends GeoTrackOptions {
+  /** Serve `/llms.txt`, `/llms-full.txt` and segment parts from the CMS. */
+  llms?: {
+    /** CMS llms.txt URL, e.g. `https://cms.example.com/api/geo/llms.txt`. */
+    source: string
+    /** CMS llms-full.txt URL. Default: `source` with `llms-full.txt`. */
+    fullSource?: string
+    /** CMS base URL of segment parts, e.g. `https://cms.example.com/api/geo/llms`. Set it when `segments` are on. */
+    segments?: string
+    maxAge?: number
+  }
+}
+
+/**
+ * The same features as withGeo and the llms routes, for any framework with Fetch API requests (Astro, Nuxt / h3,
+ * Hono, Remix, a Node server with a small adapter): reports AI crawlers and AI referrals, serves llms files and
+ * Markdown. Resolves a Response when it handled the request, or null to let the app render the page.
+ *
+ * Pass `waitUntil` when the platform has one; otherwise reports run in the background of the process.
+ */
+export function geoFetchHandler(options: GeoFetchOptions): (request: Request, context?: { waitUntil?(promise: Promise<unknown>): void }) => Promise<Response | null> {
+  const llms = options.llms
+  const txt = llms && llmsRoute({ source: llms.source, maxAge: llms.maxAge, fetch: options.fetch })
+  const full = llms && llmsRoute({ source: llms.fullSource ?? llms.source.replace(/llms\.txt$/, 'llms-full.txt'), maxAge: llms.maxAge, fetch: options.fetch })
+  const parts = llms?.segments ? llmsSegmentRoute({ source: llms.segments, maxAge: llms.maxAge, fetch: options.fetch }) : null
+  return async (request, context) => {
+    const event: WaitUntilEvent = { waitUntil: (p) => (context?.waitUntil ? context.waitUntil(p) : void p.catch(() => {})) }
+    const bot = trackAICrawler(request, event, options)
+    if (!bot && options.referrals) event.waitUntil(trackAIReferral(request, options))
+    if (request.method !== 'GET' && request.method !== 'HEAD') return null
+    const path = new URL(request.url).pathname
+    if (txt && path === '/llms.txt') return txt(request)
+    if (full && path === '/llms-full.txt') return full(request)
+    if (parts && path.startsWith('/llms/')) return parts(request, { params: { file: path.slice('/llms/'.length) } })
+    return options.markdown ? markdownResponse(request, options.markdown) : null
+  }
+}
+
 export interface JsonLdOptions {
   /** CMS JSON-LD endpoint, e.g. `https://cms.example.com/api/geo/jsonld`, or a path such as `/api/geo/jsonld` with `base`. */
   source: string

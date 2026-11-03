@@ -46,3 +46,27 @@ describe('llmsSegmentRoute', () => {
     expect(fetch.mock.calls.length).toBe(calls)
   })
 })
+
+describe('geoFetchHandler', () => {
+  it('reports crawlers, serves llms files and parts, and passes other requests through', async () => {
+    const { geoFetchHandler } = await import('./index.js')
+    const fetch = vi.fn(async (url: URL) => {
+      const u = String(url)
+      if (u.endsWith('/ingest')) return new Response('{}')
+      if (u.endsWith('/llms.txt')) return new Response('# llms')
+      if (u.endsWith('/llms-full.txt')) return new Response('# full')
+      if (u.endsWith('/posts-1.txt')) return new Response('# part 1')
+      return new Response('', { status: 404 })
+    })
+    const pending: Promise<unknown>[] = []
+    const handle = geoFetchHandler({ endpoint: 'https://cms.test/api/geo/ingest', fetch: fetch as never, llms: { source: 'https://cms.test/api/geo/llms.txt', segments: 'https://cms.test/api/geo/llms' } })
+    const req = (path: string, ua = 'Mozilla/5.0') => new Request(`https://site.test${path}`, { headers: { 'user-agent': ua } })
+    expect(await (await handle(req('/llms.txt', 'GPTBot/1.2'), { waitUntil: (p) => pending.push(p) }))!.text()).toBe('# llms')
+    await Promise.all(pending)
+    expect(fetch.mock.calls.some(([u]) => String(u).endsWith('/ingest'))).toBe(true)
+    expect(await (await handle(req('/llms-full.txt')))!.text()).toBe('# full')
+    expect(await (await handle(req('/llms/posts-1.txt')))!.text()).toBe('# part 1')
+    expect((await handle(req('/llms/x.txt')))!.status).toBe(404)
+    expect(await handle(req('/blog/a'))).toBeNull()
+  })
+})

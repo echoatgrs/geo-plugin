@@ -203,6 +203,7 @@ export {
   SeenEvents,
   contentChangeEvent,
   deliver,
+  invalidationActive,
   notifyChange,
   parseChangeEvent,
   signChange,

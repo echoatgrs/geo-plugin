@@ -1,0 +1,16 @@
+{
+  "name": "geo-example-astro-ssr",
+  "private": true,
+  "type": "module",
+  "description": "Headless GEO with Astro in SSR mode (Node adapter).",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "start": "node ./dist/server/entry.mjs"
+  },
+  "dependencies": {
+    "@astrojs/node": "11.1.9",
+    "@garus-ltd/geo-next": "^0.3.0",
+    "astro": "7.4.1"
+  }
+}

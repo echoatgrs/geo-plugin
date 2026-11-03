@@ -1,0 +1,13 @@
+{
+  "name": "geo-example-node-http",
+  "private": true,
+  "type": "module",
+  "description": "Headless GEO with a plain Node HTTP server (no framework).",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@garus-ltd/geo-next": "^0.3.0"
+  }
+}

@@ -1,4 +1,5 @@
 import {
+  invalidationActive,
   GEO_SECRET_HEADER,
   IngestLog,
   ProbeRegistry,
@@ -300,7 +301,7 @@ function dataContext(strapi: StrapiLike): DataContext {
     datasets: {
       hits: { uid: CRAWLER_HIT_UID, time: 'timestamp' },
       ...(cfg.referrals?.enabled ? { referrals: { uid: AI_REFERRAL_UID, time: 'timestamp' } } : {}),
-      ...(cfg.invalidation?.targets?.length ? { invalidations: { uid: INVALIDATION_UID, time: 'createdAt' } } : {}),
+      ...(invalidationActive(cfg.invalidation) ? { invalidations: { uid: INVALIDATION_UID, time: 'createdAt' } } : {}),
     },
   }
 }
@@ -509,7 +510,7 @@ export default {
   },
   bootstrap({ strapi }: { strapi: StrapiLike }) {
     const cfg = getConfig(strapi)
-    if (cfg.llms && cfg.invalidation?.targets?.length) subscribePermissionChanges(strapi as never, changeDeps(strapi))
+    if (cfg.llms && invalidationActive(cfg.invalidation)) subscribePermissionChanges(strapi as never, changeDeps(strapi))
     startAutoCleanup(strapi, dataContext(strapi))
     if (!cfg.secret) {
       strapi.log.warn('[geo] No secret configured: anyone can post crawler hits to /api/geo/ingest.')

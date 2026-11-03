@@ -1,0 +1,11 @@
+{
+  "name": "geo-extension-acme",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Example GEO extension that lives outside the plugin packages and uses only their public exports.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "peerDependencies": {
+    "@garus-ltd/geo-core": "^0.3.0"
+  }
+}

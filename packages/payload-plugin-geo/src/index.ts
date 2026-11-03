@@ -11,6 +11,7 @@ import {
   parseSegmentFile,
   resolvedSegments,
   validateInvalidationOptions,
+  invalidationActive,
   validateRetention,
   type InvalidationOptions,
   type RetentionOptions,
@@ -137,7 +138,7 @@ export const geoPlugin =
     if (options.llms) validateLlmsOptions(options.llms)
     validateInvalidationOptions(options.invalidation)
     validateRetention(options.retention)
-    const invalidationOn = !!options.llms && !!options.invalidation?.targets?.length
+    const invalidationOn = !!options.llms && invalidationActive(options.invalidation)
     let allCollections: CollectionConfig[] = []
     const changeContext: ChangeContext | null = invalidationOn ? { llms: options.llms!, collections: () => allCollections, invalidation: options.invalidation!, serverURL: config.serverURL } : null
     const verifyIPs = options.verifyIPs ?? true

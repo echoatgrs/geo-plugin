@@ -160,7 +160,13 @@ export interface InvalidationTarget {
 }
 
 export interface InvalidationOptions {
+  /** HTTP targets that receive signed notices. May be empty when only `onChange` is used. */
   targets: InvalidationTarget[]
+  /**
+   * In-process listener, called for every change event before the HTTP notices (e.g. purge a CDN through its
+   * SDK, or write to your own queue). Errors are logged and never fail the save or stop the notices.
+   */
+  onChange?: (event: ContentChangeEvent) => void | Promise<void>
   /** Per attempt. Default 5000 ms, at most 30000. */
   timeoutMs?: number
   /** Retries after the first attempt. Default 2, at most 5. */
@@ -192,6 +198,7 @@ export interface DeliveryStore {
 export function validateInvalidationOptions(options: InvalidationOptions | undefined): void {
   if (!options) return
   if (!Array.isArray(options.targets)) throw new TypeError('[geo] invalidation.targets must be a list')
+  if (options.onChange !== undefined && typeof options.onChange !== 'function') throw new TypeError('[geo] invalidation.onChange must be a function')
   const names = new Set<string>()
   for (const t of options.targets) {
     if (!t || typeof t.name !== 'string' || !t.name.trim()) throw new TypeError('[geo] every invalidation target needs a name')
@@ -279,8 +286,21 @@ export async function deliver(event: ContentChangeEvent, target: InvalidationTar
 }
 
 /** Sends an event to every target that wants it. Run it in the background: it never throws. */
+/** Whether change events are produced at all: HTTP targets or an `onChange` listener are configured. */
+export function invalidationActive(options: InvalidationOptions | undefined): options is InvalidationOptions {
+  return !!options && (!!options.targets?.length || typeof options.onChange === 'function')
+}
+
 export async function notifyChange(event: ContentChangeEvent, options: InvalidationOptions | undefined, deps: NotifierDeps = {}): Promise<DeliveryRecord[]> {
-  if (!options?.targets?.length) return []
+  if (!options) return []
+  if (options.onChange) {
+    try {
+      await options.onChange(event)
+    } catch (error) {
+      deps.log?.(`[geo] invalidation onChange failed: ${(error as Error)?.message ?? error}`)
+    }
+  }
+  if (!options.targets?.length) return []
   const targets = options.targets.filter((t) => !t.events || t.events.includes(event.type))
   return Promise.all(targets.map((t) => deliver(event, t, options, deps)))
 }

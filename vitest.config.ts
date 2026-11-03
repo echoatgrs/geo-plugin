@@ -9,5 +9,5 @@ export default defineConfig({
       '@garus-ltd/geo-dashboard': src('geo-dashboard', 'index.tsx'),
     },
   },
-  test: { include: ['packages/*/src/**/*.test.{ts,tsx}'] },
+  test: { include: ['packages/*/src/**/*.test.{ts,tsx}', 'examples/extension/src/**/*.test.ts'] },
 })

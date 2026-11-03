@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises'
 import {
+  invalidationActive,
   contentChangeEvent,
   deliver,
   notifyChange,
@@ -73,7 +74,7 @@ export function changeMiddleware(strapi: StrapiLike, deps: ChangeDeps) {
   return async (context: MiddlewareContext, next: () => Promise<unknown>) => {
     const llms = deps.llms()
     const options = deps.invalidation()
-    if (!llms || !options?.targets?.length || !WRITE_ACTIONS.has(context.action) || !llms.contentTypes[context.uid]) return next()
+    if (!llms || !invalidationActive(options) || !WRITE_ACTIONS.has(context.action) || !llms.contentTypes[context.uid]) return next()
     const warn = (error: unknown) => strapi.log.warn(`[geo] could not prepare a cache notice for ${context.uid}: ${(error as Error)?.message ?? error}`)
     const id: string | undefined = context.params?.documentId
     let before: LlmsDocument | null = null
@@ -109,7 +110,7 @@ export function subscribePermissionChanges(strapi: StrapiLike & { db?: { lifecyc
       timer = null
       const llms = deps.llms()
       const options = deps.invalidation()
-      if (llms && options?.targets?.length) send(strapi, siteChangeEvent('access', llms.siteURL, llmsPaths(llms)), options)
+      if (llms && invalidationActive(options)) send(strapi, siteChangeEvent('access', llms.siteURL, llmsPaths(llms)), options)
     }, debounceMs)
   }
   strapi.db?.lifecycles?.subscribe({ models: [PERMISSION_UID], afterCreate: changed, afterDelete: changed, afterUpdate: changed, afterCreateMany: changed, afterDeleteMany: changed, afterUpdateMany: changed })
@@ -128,7 +129,7 @@ export function invalidationControllers(strapi: StrapiLike, deps: ChangeDeps) {
   const configured = (ctx: KoaContextLike) => {
     const llms = deps.llms()
     const options = deps.invalidation()
-    if (!llms || !options?.targets?.length) {
+    if (!llms || !invalidationActive(options)) {
       json(ctx, 404, { error: 'invalidation is not configured' })
       return null
     }

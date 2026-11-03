@@ -1,0 +1,26 @@
+---
+import { fetchJsonLd, serializeJsonLd } from '@garus-ltd/geo-next'
+import { CMS, pageCache } from '../geo'
+
+const path = Astro.url.pathname
+let jsonLd = pageCache.get(path) as Awaited<ReturnType<typeof fetchJsonLd>> | undefined
+if (jsonLd === undefined) {
+  // Null when the path is not a published, public CMS entry.
+  jsonLd = await fetchJsonLd({ source: `${CMS}/api/geo/jsonld`, path }).catch(() => null)
+  pageCache.set(path, jsonLd)
+}
+if (!jsonLd) return new Response('Not found', { status: 404 })
+const main = (jsonLd['@graph'] as Record<string, any>[] | undefined)?.find((n) => n.headline || n.name) ?? {}
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{main.headline ?? main.name}</title>
+    <script type="application/ld+json" data-geo-jsonld set:html={serializeJsonLd(jsonLd)} />
+  </head>
+  <body>
+    <h1>{main.headline ?? main.name}</h1>
+    {main.description && <p>{main.description}</p>}
+    <p><a href={`${path}.md`}>Markdown version</a></p>
+  </body>
+</html>
