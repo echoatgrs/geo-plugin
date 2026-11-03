@@ -48,10 +48,24 @@ export const AI_BOTS: readonly BotDefinition[] = [
   { id: 'perplexity-user', name: 'Perplexity-User', platform: 'Perplexity', purpose: 'user', uaToken: 'Perplexity-User', ipRangesUrl: 'https://www.perplexity.com/perplexity-user.json' },
   // Google (Googlebot itself is classic search and intentionally not listed)
   { id: 'google-cloudvertexbot', name: 'Google-CloudVertexBot', platform: 'Google', purpose: 'training', uaToken: 'Google-CloudVertexBot' },
+  // Google's user-triggered fetchers: Gemini Notebook (formerly NotebookLM) and agents browsing for a user.
+  // Gemini answers themselves are grounded through Googlebot, which is not counted as an AI bot.
+  { id: 'google-gemininotebook', name: 'Google-GeminiNotebook', platform: 'Google', purpose: 'user', uaToken: 'Google-GeminiNotebook' },
+  { id: 'google-notebooklm', name: 'Google-NotebookLM', platform: 'Google', purpose: 'user', uaToken: 'Google-NotebookLM' },
+  { id: 'google-agent', name: 'Google-Agent', platform: 'Google', purpose: 'user', uaToken: 'Google-Agent', ipRangesUrl: 'https://developers.google.com/static/crawling/ipranges/user-triggered-agents.json' },
   // Meta
   { id: 'meta-externalagent', name: 'Meta-ExternalAgent', platform: 'Meta', purpose: 'training', uaToken: 'meta-externalagent' },
   { id: 'meta-externalfetcher', name: 'Meta-ExternalFetcher', platform: 'Meta', purpose: 'user', uaToken: 'meta-externalfetcher' },
   // Others
+  // Moonshot AI (Kimi): https://www.kimi.com/policies/kimi-crawlers
+  { id: 'kimibot', name: 'KimiBot', platform: 'Moonshot', purpose: 'training', uaToken: 'KimiBot', ipRangesUrl: 'https://www.kimi.ai/policies/kimibot.json' },
+  { id: 'kimi-searchbot', name: 'Kimi-SearchBot', platform: 'Moonshot', purpose: 'search', uaToken: 'Kimi-SearchBot', ipRangesUrl: 'https://www.kimi.ai/policies/kimi-searchbot.json' },
+  { id: 'kimi-user', name: 'Kimi-User', platform: 'Moonshot', purpose: 'user', uaToken: 'Kimi-User', ipRangesUrl: 'https://www.kimi.ai/policies/kimi-user.json' },
+
+  // Yandex (YandexGPT quick answers, Search with Alice). Yandex only offers reverse-DNS checks, so these stay unverifiable.
+  { id: 'yandexadditionalbot', name: 'YandexAdditionalBot', platform: 'Yandex', purpose: 'search', uaToken: 'YandexAdditionalBot' },
+  { id: 'yandexadditional', name: 'YandexAdditional', platform: 'Yandex', purpose: 'search', uaToken: 'YandexAdditional' },
+
   { id: 'bytespider', name: 'Bytespider', platform: 'ByteDance', purpose: 'training', uaToken: 'Bytespider' },
   { id: 'amazonbot', name: 'Amazonbot', platform: 'Amazon', purpose: 'search', uaToken: 'Amazonbot' },
   { id: 'applebot', name: 'Applebot', platform: 'Apple', purpose: 'search', uaToken: 'Applebot' },

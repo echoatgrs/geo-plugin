@@ -17,9 +17,9 @@ Visits fall into three kinds:
 
 | Purpose | Bots | What it tells you |
 | --- | --- | --- |
-| `training` | GPTBot, ClaudeBot, CCBot, Bytespider... | Your content was collected for model training |
-| `search` | OAI-SearchBot, Claude-SearchBot, PerplexityBot... | Your content is indexed by an AI search product |
-| `user` | ChatGPT-User, Claude-User, Perplexity-User... | A real person asked an AI a question and it opened your page |
+| `training` | GPTBot, ClaudeBot, KimiBot, CCBot, Bytespider... | Your content was collected for model training |
+| `search` | OAI-SearchBot, Claude-SearchBot, PerplexityBot, Kimi-SearchBot, YandexAdditional... | Your content is indexed by an AI search product |
+| `user` | ChatGPT-User, Claude-User, Perplexity-User, Kimi-User, Google-GeminiNotebook... | A real person asked an AI a question and it opened your page |
 
 ## Packages
 
@@ -365,7 +365,7 @@ change them, and no public endpoint serves them.
 
 Each hit is stored with `verification`:
 
-- `verified`: IP is inside the vendor's published list (OpenAI, Perplexity)
+- `verified`: IP is inside the vendor's published list (OpenAI, Perplexity, Kimi, Google-Agent)
 - `spoofed`: vendor publishes a list and the IP is not in it, so the User-Agent is fake
 - `unverifiable`: no published list (e.g. Anthropic), the list could not be fetched, or no IP
 

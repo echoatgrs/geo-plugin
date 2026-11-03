@@ -18,6 +18,20 @@ describe('detectBot', () => {
   })
 })
 
+describe('detectBot: Kimi, Yandex and Google user fetchers', () => {
+  it('recognises each token and keeps the longer Yandex token distinct', () => {
+    const kimi = (name: string) => `Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ${name}/1.0; +https://www.kimi.com/policies/kimi-crawlers`
+    expect(detectBot(kimi('KimiBot'))?.purpose).toBe('training')
+    expect(detectBot(kimi('Kimi-SearchBot'))?.id).toBe('kimi-searchbot')
+    expect(detectBot(kimi('Kimi-User'))?.purpose).toBe('user')
+    expect(detectBot('Mozilla/5.0 (compatible; YandexAdditionalBot/1.0; +http://yandex.com/bots)')?.id).toBe('yandexadditionalbot')
+    expect(detectBot('Mozilla/5.0 (compatible; YandexAdditional/1.0; +http://yandex.com/bots)')?.id).toBe('yandexadditional')
+    expect(detectBot('Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)')).toBeNull()
+    expect(detectBot('Mozilla/5.0 (X11; Linux x86_64) Chrome/141.0 Safari/537.36 (compatible; Google-GeminiNotebook; +https://developers.google.com/crawling/docs/crawlers-fetchers/google-gemininotebook)')?.id).toBe('google-gemininotebook')
+    expect(detectBot('Mozilla/5.0 (compatible; Google-Agent; +https://developers.google.com/crawling/docs/crawlers-fetchers/google-agent)')?.platform).toBe('Google')
+  })
+})
+
 describe('CIDR', () => {
   it('matches IPv4, IPv6 and IPv4-mapped addresses', () => {
     const ranges = ['20.171.206.0/24', '2600:1f28:3d7::/48'].map((c) => parseCIDR(c)!)
