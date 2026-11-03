@@ -1,6 +1,6 @@
 {
   "name": "payload-plugin-geo",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Headless GEO for Payload CMS: AI crawler logs, llms.txt and an AI visibility dashboard.",
   "license": "MIT",
   "repository": {
@@ -53,8 +53,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@garus-ltd/geo-core": "0.2.0",
-    "@garus-ltd/geo-dashboard": "0.2.0"
+    "@garus-ltd/geo-core": "0.3.0",
+    "@garus-ltd/geo-dashboard": "0.3.0"
   },
   "peerDependencies": {
     "payload": "^3.0.0",

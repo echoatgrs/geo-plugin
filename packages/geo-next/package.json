@@ -1,6 +1,6 @@
 {
   "name": "@garus-ltd/geo-next",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Frontend SDK for Headless GEO: Next.js proxy / middleware that reports AI crawler visits to your CMS.",
   "license": "MIT",
   "repository": {
@@ -41,7 +41,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@garus-ltd/geo-core": "0.2.0"
+    "@garus-ltd/geo-core": "0.3.0"
   },
   "module": "./dist/index.js",
   "publishConfig": {
