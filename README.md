@@ -403,7 +403,22 @@ npm run typecheck
 2. ~~`llms.txt`, `llms-full.txt`, Markdown version of each page (`/xxx.md`)~~
 3. ~~JSON-LD from config presets (Article, FAQ)~~, ~~more presets (Product, HowTo, LocalBusiness, BreadcrumbList)~~
 4. ~~Admin dashboard~~, ~~per-document sidebar in the editor~~
-5. ~~AI referral visits and hand-recorded citation evidence~~; automatic citation monitoring through an authorised API
+5. ~~AI referral visits and hand-recorded citation evidence~~
+
+### Planned, built if the waitlist asks for it
+
+These need an always-on service, so they will live in a hosted version, **Askbeam**. Nothing here is built yet;
+join the waitlist and tell us which one you want first.
+
+- **All sites, one view**: crawler fetches and user fetches across all your (or your clients') sites.
+- **Alerts and weekly reports**: a deploy starts blocking an AI crawler, or user fetches drop.
+- **Scheduled checks**: visit the site from outside and flag pages AI can't read (robots.txt, JS-only, never fetched).
+- **AI indexing and exposure**: ask your questions on a schedule to ChatGPT, Perplexity and Gemini, and to
+  regional assistants most tools skip (YandexGPT and GigaChat in Russia; Doubao, Kimi and Qwen in China).
+  Record whether the answer cites your pages and where, and match it against the crawler log to find pages
+  that are indexed but never cited. Official APIs only.
+- **Regional search crawlers in the log**: Russian and Chinese assistants mostly answer from their own search
+  index, so count YandexBot, Baiduspider, Bytespider, Sogou and YisouSpider alongside the AI crawlers.
 
 ## License
 
