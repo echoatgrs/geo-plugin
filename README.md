@@ -413,9 +413,10 @@ join the waitlist and tell us which one you want first.
 - **All sites, one view**: crawler fetches and user fetches across all your (or your clients') sites.
 - **Alerts and weekly reports**: a deploy starts blocking an AI crawler, or user fetches drop.
 - **Scheduled checks**: visit the site from outside and flag pages AI can't read (robots.txt, JS-only, never fetched).
-- **AI citation monitoring, China first**: ask your questions on a schedule to Chinese AI assistants
-  (Doubao, Kimi, Qwen, ERNIE Bot, Yuanbao) and to ChatGPT, record whether the answer cites your pages and
-  where, and match it against the crawler log to find pages AI reads but never cites. Official APIs only.
+- **AI citation monitoring**: ask your questions on a schedule to ChatGPT, Perplexity and Gemini, and also to
+  Chinese assistants (Doubao, Kimi, Qwen, ERNIE Bot, Yuanbao) that most tools skip. Record whether the answer
+  cites your pages and where, and match it against the crawler log to find pages AI reads but never cites.
+  Official APIs only.
 - **Chinese search crawlers in the log**: most Chinese assistants answer from their own search index, so
   count Baiduspider, Bytespider, Sogou and YisouSpider alongside the AI crawlers.
 
