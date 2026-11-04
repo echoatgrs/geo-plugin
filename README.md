@@ -407,7 +407,7 @@ npm run typecheck
 
 ### Planned, built if the waitlist asks for it
 
-These need an always-on service, so they will live in a hosted version. Nothing here is built yet;
+These need an always-on service, so they will live in a hosted version, **Askbeam**. Nothing here is built yet;
 join the waitlist and tell us which one you want first.
 
 - **All sites, one view**: crawler fetches and user fetches across all your (or your clients') sites.
